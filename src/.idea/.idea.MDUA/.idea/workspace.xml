@@ -7,7 +7,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e4c426c6-e528-424a-93a0-14089bd8c786" name="Changes" comment="" />
+    <list default="true" id="e4c426c6-e528-424a-93a0-14089bd8c786" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/.idea.MDUA/.idea/material_theme_project_new.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.MDUA/.idea/material_theme_project_new.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.idea.MDUA/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.MDUA/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MDUA.Web.UI/appsettings.json" beforeDir="false" afterPath="$PROJECT_DIR$/MDUA.Web.UI/appsettings.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MDUA.Web.UI/wwwroot/js/combo.js" beforeDir="false" afterPath="$PROJECT_DIR$/MDUA.Web.UI/wwwroot/js/combo.js" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -75,7 +80,8 @@
       <workItem from="1764472506144" duration="2079000" />
       <workItem from="1764476076467" duration="2000" />
       <workItem from="1764476125565" duration="2640000" />
-      <workItem from="1764479346136" duration="5250000" />
+      <workItem from="1764479346136" duration="7549000" />
+      <workItem from="1764488167959" duration="4055000" />
     </task>
     <servers />
   </component>
@@ -101,6 +107,11 @@
           <properties exception="System.Threading.ThreadAbortException" breakIfHandledByOtherCode="false" displayValue="System.Threading.ThreadAbortException" />
           <option name="timeStamp" value="3" />
         </breakpoint>
+        <line-breakpoint enabled="true" type="javascript">
+          <url>file://$PROJECT_DIR$/MDUA.Web.UI/wwwroot/js/combo.js</url>
+          <line>8</line>
+          <option name="timeStamp" value="4" />
+        </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
   </component>

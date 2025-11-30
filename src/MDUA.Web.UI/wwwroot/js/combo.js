@@ -70,9 +70,36 @@
     function findAndApplyVariant() {
         $('#selected-variant-id').val('');
 
+        // 1. Determine Total Required Attributes dynamically
+        // We count the unique 'data-attribute' names from the chips in the DOM
+        const requiredAttributes = new Set();
+        $('.variant-chip').each(function() {
+            requiredAttributes.add($(this).data('attribute'));
+        });
+
+        const requiredCount = requiredAttributes.size;
+        const selectedCount = Object.keys(selectedAttributes).length;
+
+        // 2. CHECK: Has the user selected ALL required attributes?
+        if (selectedCount < requiredCount) {
+            // If not all selected, reset to base state
+            resetToDefault();
+
+            // Show "Product Unavailable" or prompt user
+            $('#stock-message')
+                .text("Product Unavailable (Please select all options)")
+                .removeClass('text-success')
+                .addClass('text-danger show');
+
+            // Explicitly show the container because resetToDefault() hides it
+            $('#variant-info').show();
+            return;
+        }
+
+        // 3. Find the matching variant (Only runs if all attributes are selected)
         const matchedVariant = variants.find(v => {
             for (let key in selectedAttributes) {
-                // Use strict equality check logic or robust string comparison
+                // Use strict string comparison
                 if (!v.attributes[key] || String(v.attributes[key]) !== String(selectedAttributes[key])) {
                     return false;
                 }
@@ -90,7 +117,6 @@
             handleNoMatch();
         }
     }
-
     function applyVariantData(variant) {
         $('#selected-variant-id').val(variant.id);
         currentVariantPrice = variant.price;
@@ -196,17 +222,20 @@
 
         $msg.hide().removeClass('text-danger').removeClass('text-success');
 
+        // 1. If empty, reset button and exit
         if (!email) {
             $('.submit-btn').prop('disabled', false).text('Confirm Order');
             return;
         }
 
+        // 2. If it matches the autofilled email exactly, it's valid
         if (isEmailAutofilled && email === currentCustomerEmail) {
             $msg.text("✓ Using your registered email").css('color', 'green').show();
             $('.submit-btn').prop('disabled', false).text('Confirm Order');
             return;
         }
 
+        // 3. Basic validation
         if (!email.includes('@')) {
             $msg.text("⚠ Please enter a valid email address").css('color', 'orange').show();
             $('.submit-btn').prop('disabled', false).text('Confirm Order');
@@ -221,26 +250,34 @@
             isCheckingEmail = false;
 
             if (res.exists) {
+                // --- CHANGED LOGIC HERE ---
+                // Previous logic: Blocked the user (Red text, Disabled button)
+                // New logic: Welcomes the user (Green/Blue text, ENABLED button)
+
                 if (email === currentCustomerEmail) {
                     $msg.text("✓ Using your registered email").css('color', 'green').show();
-                    $('.submit-btn').prop('disabled', false).text('Confirm Order');
                 } else {
-                    $msg.text("✗ Email already exists! Please use another.").css('color', 'red').show();
-                    $('.submit-btn').prop('disabled', true).text('Confirm Order');
+                    // Determine if this is a "Welcome Back" scenario
+                    $msg.text("✓ Account found! We will link this order to you.").css('color', 'blue').show();
                 }
+
+                // ALWAYS enable the button if the email is valid, even if it exists
+                $('.submit-btn').prop('disabled', false).text('Confirm Order');
             } else {
+                // Email is new - also valid
                 $msg.text("✓ Email available").css('color', 'green').show();
                 $('.submit-btn').prop('disabled', false).text('Confirm Order');
             }
         })
             .fail(function () {
                 isCheckingEmail = false;
-                $msg.text("⚠ Could not verify email. Please try again.").css('color', 'orange').show();
+                // In case of server error, usually safer to let them try to submit
+                $msg.text("⚠ Could not verify email, but you can proceed.").css('color', 'orange').show();
                 $('.submit-btn').prop('disabled', false).text('Confirm Order');
             });
     });
-
     // ✅ FIXED: Using Debounce (500ms) to prevent server spam on typing
+// ✅ FIXED: Using Debounce (500ms) to prevent server spam on typing
     $('#customerPhone').on('input', debounce(function () {
         let phone = $(this).val();
 
@@ -251,8 +288,10 @@
                 if (data.found) {
                     $('#phone-status').text("✓ Welcome back! Info loaded.").css('color', 'green');
 
+                    // 1. FILL NAME
                     if (data.name) $('#customerName').val(data.name);
 
+                    // 2. FILL EMAIL (With logic for @guest.local)
                     if (data.email) {
                         const $emailField = $('#customerEmail');
                         const currentEmailValue = $emailField.val().trim();
@@ -268,17 +307,9 @@
                         }
                     }
 
-                    if (data.addressData) {
-                        const addr = data.addressData;
-                        $('textarea[name="Street"]').val(addr.street);
-                        $('input[name="PostalCode"]').val(addr.postalCode);
-                        $('input[name="ZipCode"]').val(addr.zipCode);
-                        $('#division-select').val(addr.divison).trigger('change');
+                    // ❌ REMOVED: Address Autofill Logic
+                    // The block that filled Street, PostalCode, Division, etc. is deleted.
 
-                        setTimeout(() => {
-                            $('#district-select').val(addr.city).trigger('change');
-                        }, 500);
-                    }
                 } else {
                     $('#phone-status').text("New Customer").css('color', '#666');
                     isEmailAutofilled = false;
@@ -294,7 +325,6 @@
             currentCustomerEmail = null;
         }
     }, 500)); // 500ms delay
-
     // ==================================================
     // 3. LOCATION & TOTALS (ROBUST CASCADING)
     // ==================================================
