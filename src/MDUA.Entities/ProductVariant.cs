@@ -16,6 +16,10 @@ namespace MDUA.Entities
         public decimal DiscountedPrice { get; set; }
         [DataMember]
         public string VariantImageUrl { get; set; }
+        public int ImageCount { get; set; }
+        [DataMember]
+        public virtual Product Product { get; set; }
+   
 
     } // ⬅️ CLOSE THE CLASS HERE
 

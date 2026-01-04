@@ -27,11 +27,9 @@ namespace MDUA.DataAccess
             AddParameter(cmd, pBool("AllowBackorder", vps.AllowBackorder));
             AddParameter(cmd, pInt32("WeightGrams", vps.WeightGrams));
 
-            // Use ExecuteNonQuery for inserts that don't return an identity
-            // Or use your framework's equivalent. Assuming InsertRecord handles this.
             long result = InsertRecord(cmd);
 
-            return (int)result; // Returns the row count (1 if successful)
+            return (int)result; 
         }
 
         public long UpdatePrice(int variantId, decimal price, string sku)
@@ -39,7 +37,7 @@ namespace MDUA.DataAccess
             // We update SKU in ProductVariant and Price in BOTH tables
             string SQLQuery = @"
         UPDATE ProductVariant 
-        SET VariantPrice = @Price, SKU = @SKU, UpdatedAt = GETDATE() 
+        SET VariantPrice = @Price, SKU = @SKU, UpdatedAt = GETUTCDATE() 
         WHERE Id = @Id;
 
         UPDATE VariantPriceStock 
@@ -65,6 +63,76 @@ namespace MDUA.DataAccess
 
                 return 1;
             }
+        }
+
+        public void AddStock(int variantId, int qty, SqlTransaction transaction)
+        {
+            // Simply adds to existing stock
+            string SQL = @"UPDATE VariantPriceStock SET StockQty = StockQty + @Qty WHERE Id = @Id";
+            using (SqlCommand cmd = new SqlCommand(SQL, transaction.Connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@Id", variantId);
+                cmd.Parameters.AddWithValue("@Qty", qty);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        // Helper to find ProductId from Variant (for InventoryTransaction)
+        public int GetProductIdByVariant(int variantId)
+        {
+            string SQL = "SELECT ProductId FROM ProductVariant WHERE Id = @Id";
+            using (SqlCommand cmd = GetSQLCommand(SQL))
+            {
+                AddParameter(cmd, pInt32("Id", variantId));
+                if (cmd.Connection.State != System.Data.ConnectionState.Open) cmd.Connection.Open();
+                var result = cmd.ExecuteScalar();
+                cmd.Connection.Close();
+                return result != null ? Convert.ToInt32(result) : 0;
+            }
+        }
+
+        public List<LowStockItem> GetLowStockVariants(int topN = 5)
+        {
+            var list = new List<LowStockItem>();
+
+            // ✅ FIX 1: Added 'vps.Id' to the SELECT list
+            string sql = $@"
+        SELECT TOP (@TopN)
+            vps.Id, 
+            p.ProductName,
+            pv.VariantName,
+            vps.StockQty,
+            vps.Price
+        FROM [dbo].[VariantPriceStock] vps
+        INNER JOIN [dbo].[ProductVariant] pv ON vps.Id = pv.Id
+        INNER JOIN [dbo].[Product] p ON pv.ProductId = p.Id
+        WHERE p.IsActive = 1 AND pv.IsActive = 1
+        ORDER BY vps.StockQty ASC, p.ProductName ASC";
+
+            using (SqlCommand cmd = GetSQLCommand(sql))
+            {
+                AddParameter(cmd, pInt32("TopN", topN));
+
+                SqlDataReader reader;
+                SelectRecords(cmd, out reader);
+
+                using (reader)
+                {
+                    while (reader.Read())
+                    {
+                        list.Add(new LowStockItem
+                        {
+                            // ✅ FIX 2: Map the Id to VariantId
+                            VariantId = Convert.ToInt32(reader["Id"]),
+                            ProductName = reader["ProductName"].ToString(),
+                            VariantName = reader["VariantName"] != DBNull.Value ? reader["VariantName"].ToString() : "",
+                            StockQty = Convert.ToInt32(reader["StockQty"]),
+                            Price = Convert.ToDecimal(reader["Price"])
+                        });
+                    }
+                }
+            }
+            return list;
         }
     }	
 }

@@ -18,25 +18,27 @@ namespace MDUA.DataAccess
         /// </summary>
         public ProductVariantList GetProductVariantsByProductId(int productId)
         {
+            // 1. Modified SQL: Added a subquery to count VariantImage rows
             string SQLQuery = @"
-             SELECT 
-                v.Id,
-                v.ProductId,
-                v.VariantName,
-                v.SKU,
-                v.Barcode,
-                v.VariantPrice,
-                v.IsActive,
-                v.CreatedBy,
-                v.CreatedAt,
-                v.UpdatedBy,
-                v.UpdatedAt,
-                ISNULL(vps.StockQty, 0) AS StockQty,
-                ISNULL(vps.Price, 0) AS VPS_Price
-             FROM ProductVariant v
-             LEFT JOIN VariantPriceStock vps ON v.Id = vps.Id
-             WHERE v.ProductId = @ProductId
-             ORDER BY v.Id";
+        SELECT 
+            v.Id,
+            v.ProductId,
+            v.VariantName,
+            v.SKU,
+            v.Barcode,
+            v.VariantPrice,
+            v.IsActive,
+            v.CreatedBy,
+            v.CreatedAt,
+            v.UpdatedBy,
+            v.UpdatedAt,
+            ISNULL(vps.StockQty, 0) AS StockQty,
+            ISNULL(vps.Price, 0) AS VPS_Price,
+            (SELECT COUNT(1) FROM VariantImage vi WHERE vi.VariantId = v.Id) AS ImageCount
+        FROM ProductVariant v
+        LEFT JOIN VariantPriceStock vps ON v.Id = vps.Id
+        WHERE v.ProductId = @ProductId
+        ORDER BY v.Id";
 
             using SqlCommand cmd = GetSQLCommand(SQLQuery);
             AddParameter(cmd, pInt32("ProductId", productId));
@@ -59,12 +61,15 @@ namespace MDUA.DataAccess
                         VariantPrice = reader.IsDBNull(5) ? (decimal?)null : reader.GetDecimal(5),
                         IsActive = reader.IsDBNull(6) ? true : reader.GetBoolean(6),
                         CreatedBy = reader.IsDBNull(7) ? "" : reader.GetString(7),
-                        CreatedAt = reader.IsDBNull(8) ? DateTime.Now : reader.GetDateTime(8),
+                        CreatedAt = reader.IsDBNull(8) ? DateTime.UtcNow : reader.GetDateTime(8),
                         UpdatedBy = reader.IsDBNull(9) ? "" : reader.GetString(9),
                         UpdatedAt = reader.IsDBNull(10) ? (DateTime?)null : reader.GetDateTime(10),
-                        // stock and optional price from VariantPriceStock
-                        StockQty = reader.IsDBNull(11) ? 0 : reader.GetInt32(11)
-                        // If you want to map VPS_Price, add a property to ProductVariant or ignore it here
+                        StockQty = reader.IsDBNull(11) ? 0 : reader.GetInt32(11),
+
+                        // 2. Map the new column (Index 13 in SQL, because index starts at 0)
+                        // Index 12 is VPS_Price (which we skipped mapping in your original code), 
+                        // so ImageCount is at index 13.
+                        ImageCount = reader.IsDBNull(13) ? 0 : reader.GetInt32(13)
                     };
 
                     list.Add(variant);
@@ -74,67 +79,46 @@ namespace MDUA.DataAccess
 
             return list;
         }
-        // File: MDUA.DataAccess/ProductVariantDataAccess.cs (Your custom partial file)
-
-public ProductVariant GetWithStock(int id)
-{
-    // We use inline SQL here to join the tables and get the stock
-    string SQLQuery = @"
+        public List<VariantAttributeDto> GetVariantAttributesByProductId(int productId)
+        {
+            string SQLQuery = @"
         SELECT 
-            v.Id,
-            v.ProductId,
-            v.VariantName,
-            v.SKU,
-            v.Barcode,
-            v.VariantPrice,
-            v.IsActive,
-            v.CreatedBy,
-            v.CreatedAt,
-            v.UpdatedBy,
-            v.UpdatedAt,
-            ISNULL(vps.StockQty, 0) AS StockQty,  -- Get Stock
-            ISNULL(vps.Price, 0) AS VPS_Price
-        FROM ProductVariant v
-        LEFT JOIN VariantPriceStock vps ON v.Id = vps.Id
-        WHERE v.Id = @Id";
+            vav.VariantId,
+            an.Name AS AttributeName,
+            av.Value AS AttributeValue
+        FROM VariantAttributeValue vav
+        INNER JOIN AttributeName an ON vav.AttributeId = an.Id
+        INNER JOIN AttributeValue av ON vav.AttributeValueId = av.Id
+        INNER JOIN ProductVariant pv ON vav.VariantId = pv.Id
+        WHERE pv.ProductId = @ProductId
+        ORDER BY vav.VariantId, vav.DisplayOrder";
 
     using SqlCommand cmd = GetSQLCommand(SQLQuery);
-    AddParameter(cmd, pInt32("Id", id));
+            AddParameter(cmd, pInt32("ProductId", productId));
 
-    SqlDataReader reader;
-    SelectRecords(cmd, out reader);
+            // ✅ FIX: Open connection before calling ExecuteReader
+            if (cmd.Connection.State != System.Data.ConnectionState.Open)
+            
+                cmd.Connection.Open();
+            
 
-    ProductVariant variant = null;
+    var list = new List<VariantAttributeDto>();
 
-    using (reader)
-    {
-        if (reader.Read())
-        {
-            // Manual mapping is required because the default FillObject() 
-            // doesn't know about the joined columns
-            variant = new ProductVariant
+            using (SqlDataReader reader = cmd.ExecuteReader())
             {
-                Id = reader.GetInt32(0),
-                ProductId = reader.GetInt32(1),
-                VariantName = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                SKU = reader.IsDBNull(3) ? "" : reader.GetString(3),
-                Barcode = reader.IsDBNull(4) ? "" : reader.GetString(4),
-                VariantPrice = reader.IsDBNull(5) ? (decimal?)null : reader.GetDecimal(5),
-                IsActive = reader.IsDBNull(6) ? true : reader.GetBoolean(6),
-                CreatedBy = reader.IsDBNull(7) ? "" : reader.GetString(7),
-                CreatedAt = reader.IsDBNull(8) ? DateTime.Now : reader.GetDateTime(8),
-                UpdatedBy = reader.IsDBNull(9) ? "" : reader.GetString(9),
-                UpdatedAt = reader.IsDBNull(10) ? (DateTime?)null : reader.GetDateTime(10),
-                
-                // ✅ THIS IS THE FIX: Read the stock column
-                StockQty = reader.IsDBNull(11) ? 0 : reader.GetInt32(11) 
-            };
+                while (reader.Read())
+                {
+                    list.Add(new VariantAttributeDto
+                    {
+                        VariantId = reader.GetInt32(0),
+                        AttributeName = reader.GetString(1),
+                        AttributeValue = reader.GetString(2)
+                   
+                    }); 
         }
-        reader.Close();
-    }
-
-    return variant;
-}
+            }
+            return list;
+        }
         public int Insert(ProductVariant variant)
         {
             using SqlCommand cmd = GetSPCommand("InsertProductVariant");
@@ -199,5 +183,66 @@ public ProductVariant GetWithStock(int id)
             }
         }
 
+
+        public ProductVariant GetWithStock(int id)
+        {
+            // We use inline SQL here to join the tables and get the stock
+            string SQLQuery = @"
+        SELECT 
+            v.Id,
+            v.ProductId,
+            v.VariantName,
+            v.SKU,
+            v.Barcode,
+            v.VariantPrice,
+            v.IsActive,
+            v.CreatedBy,
+            v.CreatedAt,
+            v.UpdatedBy,
+            v.UpdatedAt,
+            ISNULL(vps.StockQty, 0) AS StockQty,  -- Get Stock
+            ISNULL(vps.Price, 0) AS VPS_Price
+        FROM ProductVariant v
+        LEFT JOIN VariantPriceStock vps ON v.Id = vps.Id
+        WHERE v.Id = @Id";
+
+            using SqlCommand cmd = GetSQLCommand(SQLQuery);
+            AddParameter(cmd, pInt32("Id", id));
+
+            SqlDataReader reader;
+            SelectRecords(cmd, out reader);
+
+            ProductVariant variant = null;
+
+            using (reader)
+            {
+                if (reader.Read())
+                {
+                    // Manual mapping is required because the default FillObject() 
+                    // doesn't know about the joined columns
+                    variant = new ProductVariant
+                    {
+                        Id = reader.GetInt32(0),
+                        ProductId = reader.GetInt32(1),
+                        VariantName = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                        SKU = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                        Barcode = reader.IsDBNull(4) ? "" : reader.GetString(4),
+                        VariantPrice = reader.IsDBNull(5) ? (decimal?)null : reader.GetDecimal(5),
+                        IsActive = reader.IsDBNull(6) ? true : reader.GetBoolean(6),
+                        CreatedBy = reader.IsDBNull(7) ? "" : reader.GetString(7),
+                        CreatedAt = reader.IsDBNull(8) ? DateTime.UtcNow : reader.GetDateTime(8),
+                        UpdatedBy = reader.IsDBNull(9) ? "" : reader.GetString(9),
+                        UpdatedAt = reader.IsDBNull(10) ? (DateTime?)null : reader.GetDateTime(10),
+
+                        // ✅ THIS IS THE FIX: Read the stock column
+                        StockQty = reader.IsDBNull(11) ? 0 : reader.GetInt32(11)
+                    };
+                }
+                reader.Close();
+            }
+
+            return variant;
+        }
     }
 }
+

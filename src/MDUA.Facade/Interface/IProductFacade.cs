@@ -28,6 +28,8 @@ namespace MDUA.Facade.Interface
         long UpdateProduct(Product product, string username);
         long UpdateVariantPrice(int variantId, decimal newPrice, string newSku);
         long DeleteVariant(int variantId);
+
+        List<VariantAttributeDto> GetVariantAttributes(int productId);
         List<AttributeName> GetAttributesForProduct(int productId);
         long AddVariantToExistingProduct(ProductVariant variant);
         ProductVariantResult GetVariantsWithAttributes(int productId);
@@ -54,5 +56,15 @@ namespace MDUA.Facade.Interface
         void UpdateProductImageSortOrder(int imageId, int sortOrder);
         void UpdateVariantImageDisplayOrder(int imageId, int displayOrder);
         ProductDiscount GetBestDiscount(int productId, decimal basePrice);
+        ProductList SearchProducts(string searchTerm);
+        List<ProductVideo> GetProductVideos(int productId);
+        Task<long> AddProductVideo(ProductVideo video, string username);
+        Task<string> ConvertToEmbedUrl(string url);
+        long DeleteProductVideo(int videoId);
+        void SetPrimaryProductVideo(int videoId, int productId, string username);
+        List<LowStockItem> GetLowStockVariants(int topN);
+
+        LandingPageViewModel GetHomepageData();
+        
     }
 }

@@ -28,73 +28,71 @@ namespace MDUA.DataAccess
         {
             string SQLQuery = @"
         SELECT 
-            p.Id,
-            p.CompanyId,
-            p.ProductName,
-            p.ReorderLevel,
-            p.Barcode,
-            p.CategoryId,
-            p.Description,
-            p.Slug,
-            p.BasePrice,
-            p.IsVariantBased,
-            p.IsActive,
-            p.CreatedBy,
-            p.CreatedAt,
-            p.UpdatedBy,
-            p.UpdatedAt,
+            p.Id, p.CompanyId, p.ProductName, p.ReorderLevel, p.Barcode,
+            p.CategoryId, p.Description, p.Slug, p.BasePrice, p.IsVariantBased,
+            p.IsActive, p.CreatedBy, p.CreatedAt, p.UpdatedBy, p.UpdatedAt,
             c.CompanyName,
             ISNULL(SUM(vps.StockQty), 0) AS TotalStockQuantity
-        FROM 
-            Product p
-        LEFT JOIN 
-            Company c ON p.CompanyId = c.Id
-        LEFT JOIN 
-            ProductVariant pv ON pv.ProductId = p.Id
-        LEFT JOIN 
-            VariantPriceStock vps ON vps.Id = pv.Id
-        WHERE 
-            p.Id = @Id
+        FROM Product p
+        LEFT JOIN Company c ON p.CompanyId = c.Id
+        LEFT JOIN ProductVariant pv ON pv.ProductId = p.Id
+        LEFT JOIN VariantPriceStock vps ON vps.Id = pv.Id
+        WHERE p.Id = @Id
         GROUP BY 
             p.Id, p.CompanyId, p.ProductName, p.ReorderLevel, p.Barcode, 
             p.CategoryId, p.Description, p.Slug, p.BasePrice, p.IsVariantBased, 
-            p.IsActive, p.CreatedBy, p.CreatedAt, p.UpdatedBy, p.UpdatedAt, c.CompanyName;
-    ";
+            p.IsActive, p.CreatedBy, p.CreatedAt, p.UpdatedBy, p.UpdatedAt, c.CompanyName;";
 
             using SqlCommand cmd = GetSQLCommand(SQLQuery);
             AddParameter(cmd, pInt32("Id", _Id));
 
-            return GetObject(cmd);
-        }
+            // ✅ FIX: Ensure the connection is open for async/AI service calls
+            if (cmd.Connection.State != System.Data.ConnectionState.Open)
+                cmd.Connection.Open();
 
+    // 1. Get the object
+     Product product = GetObject(cmd); 
+
+    // 2. Force the DateTimeKind to UTC
+    if (product != null)
+            {
+                if (product.CreatedAt.HasValue)
+                     product.CreatedAt = DateTime.SpecifyKind(product.CreatedAt.Value, DateTimeKind.Utc); 
+
+        if (product.UpdatedAt.HasValue)
+                  product.UpdatedAt = DateTime.SpecifyKind(product.UpdatedAt.Value, DateTimeKind.Utc); 
+    }
+
+            return product;
+        }
         public ProductList GetLastFiveProducts()
         {
             string SQLQuery = @"
-        SELECT TOP 5
-            Id,
-            CompanyId,
-            ProductName,
-            ReorderLevel,
-            Barcode,
-            CategoryId,
-            Description,
-            Slug,
-            BasePrice,
-            IsVariantBased,
-            IsActive,
-            CreatedBy,
-            CreatedAt,
-            UpdatedBy,
-            UpdatedAt
-        FROM Product
-        WHERE IsActive = 1
-        ORDER BY CreatedAt DESC";
+    SELECT TOP 5
+        Id,
+        CompanyId,
+        ProductName,
+        ReorderLevel,
+        Barcode,
+        CategoryId,
+        Description,
+        Slug,
+        BasePrice,
+        IsVariantBased,
+        IsActive,
+        CreatedBy,
+        CreatedAt,
+        UpdatedBy,
+        UpdatedAt,
+        ExtraInfo -- <--- ADDED THIS COLUMN
+    FROM Product
+    WHERE IsActive = 1
+    ORDER BY CreatedAt DESC";
 
             using SqlCommand cmd = GetSQLCommand(SQLQuery);
 
             return GetList(cmd, 5);
         }
-
         public bool? ToggleStatus(int productId)
         {
             // --- QUERY 1: UPDATE the product ---
@@ -149,6 +147,142 @@ namespace MDUA.DataAccess
             return newStatus;
         }
 
-       
+        // 1. GET FULL LIST
+        public ProductList GetAllProductsWithCategory()
+        {
+            string SQLQuery = @"
+                SELECT TOP 100 
+                    p.Id, p.CompanyId, p.ProductName, p.ReorderLevel, p.Barcode,
+                    p.CategoryId, p.Description, p.Slug, p.BasePrice, p.IsVariantBased,
+                    p.IsActive, p.CreatedBy, p.CreatedAt, p.UpdatedBy, p.UpdatedAt,
+                    NULL as DummyForBase, -- Index 15: Buffer for FillBaseObject
+                    ISNULL(c.Name, '') as CategoryName -- Index 16: Actual Data
+                FROM Product p
+                LEFT JOIN ProductCategory c ON p.CategoryId = c.Id
+                ORDER BY p.CreatedAt DESC";
+
+            using SqlCommand cmd = GetSQLCommand(SQLQuery);
+            return GetListWithCategory(cmd);
+        }
+        private ProductList GetListWithCategory(SqlCommand cmd)
+        {
+            ProductList list = new ProductList();
+            SqlDataReader reader;
+
+            SelectRecords(cmd, out reader);
+
+            using (reader)
+            {
+                while (reader.Read())
+                {
+                    Product product = new Product();
+
+                    // 1. Fill standard properties (Indices 0-14, and potentially 15 via Base)
+                    FillObject(product, reader);
+
+                    // 2. Explicitly read Index 16 for CategoryName
+                    if (reader.FieldCount > 16 && !reader.IsDBNull(16))
+                    {
+                        product.CategoryName = reader.GetString(16);
+                    }
+                    else
+                    {
+                        // Use empty string so Facade can set "N/A" if needed
+                        // or leave as is if you want it blank
+                        product.CategoryName = "";
+                    }
+
+                    list.Add(product);
+                }
+                reader.Close();
+            }
+            return list;
+        }
+        // 2. SEARCH PRODUCTS
+        public ProductList SearchProducts(string searchTerm)
+        {
+            // 1. Sanitize and Tokenize
+            if (string.IsNullOrWhiteSpace(searchTerm)) return new ProductList();
+
+            // Split the search term into individual words
+            var keywords = searchTerm.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // If no valid keywords, return empty
+            if (keywords.Length == 0) return new ProductList();
+
+            // 2. Build Dynamic SQL
+            // We want: (ProductName LIKE '%Word1%' AND ProductName LIKE '%Word2%')
+            // This allows "Combo - 3" to match "Combo" AND "3" even if the dash is missing in the search.
+
+            var sqlBuilder = new System.Text.StringBuilder();
+            sqlBuilder.Append(@"
+        SELECT TOP 50
+            p.Id, p.CompanyId, p.ProductName, p.ReorderLevel, p.Barcode,
+            p.CategoryId, p.Description, p.Slug, p.BasePrice, p.IsVariantBased,
+            p.IsActive, p.CreatedBy, p.CreatedAt, p.UpdatedBy, p.UpdatedAt,
+            NULL as DummyForBase,
+            ISNULL(c.Name, '') as CategoryName
+        FROM Product p
+        LEFT JOIN ProductCategory c ON p.CategoryId = c.Id
+        WHERE p.IsActive = 1 
+          AND (
+            (");
+
+            // Loop through keywords to build the "AND LIKE" clauses for Product Name
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                if (i > 0) sqlBuilder.Append(" AND ");
+                sqlBuilder.Append($"p.ProductName LIKE @Word{i}");
+            }
+
+            sqlBuilder.Append(@") 
+            OR p.Id IN (
+                -- Also check variants (OR logic inside variants is usually safer, but let's stick to AND for precision)
+                SELECT ProductId 
+                FROM ProductVariant pv 
+                WHERE ");
+
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                if (i > 0) sqlBuilder.Append(" AND ");
+                // Check both VariantName and SKU
+                sqlBuilder.Append($"(pv.VariantName LIKE @Word{i} OR pv.SKU LIKE @Word{i})");
+            }
+
+            sqlBuilder.Append(@")
+          )
+        ORDER BY p.ProductName ASC");
+
+            // 3. Execute
+            using SqlCommand cmd = GetSQLCommand(sqlBuilder.ToString());
+
+            // Add Parameters dynamically
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                // Wrap each word in wildcards: %word%
+                AddParameter(cmd, pNVarChar($"Word{i}", 100, $"%{keywords[i]}%"));
+            }
+
+            return GetListWithCategory(cmd);
+        }
+
+        public ProductList GetRecentProductsWithImages(int count)
+        {
+            // Fetches the latest active products
+            string SQLQuery = $@"
+        SELECT TOP ({count}) 
+            p.Id, p.CompanyId, p.ProductName, p.ReorderLevel, p.Barcode,
+            p.CategoryId, p.Description, p.Slug, p.BasePrice, p.IsVariantBased,
+            p.IsActive, p.CreatedBy, p.CreatedAt, p.UpdatedBy, p.UpdatedAt,
+            NULL as DummyForBase,
+            ISNULL(c.Name, '') as CategoryName
+        FROM Product p
+        LEFT JOIN ProductCategory c ON p.CategoryId = c.Id
+        WHERE p.IsActive = 1
+        ORDER BY p.CreatedAt DESC";
+
+            using SqlCommand cmd = GetSQLCommand(SQLQuery);
+            return GetListWithCategory(cmd); // Reuse your existing private helper
+        }
     }
 }

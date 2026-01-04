@@ -33,11 +33,29 @@ namespace MDUA.DataAccess.Interface
 	{
         long InsertSalesOrderHeaderSafe(SalesOrderHeader order);
         SalesOrderHeaderList GetOrdersByCompanyCustomer(int companyCustomerId);
-
-        // Add this new signature
         SalesOrderHeaderList GetOrdersByCustomerId(int customerId);
         List<object> GetOrderReceiptByOnlineId(string onlineOrderId);
         SalesOrderHeaderList GetAllSalesOrderHeaders();
+        void UpdateStatusSafe(int orderId, string status, bool confirmed);
+        List<Dictionary<string, object>> GetVariantsForDropdown();
+        (int StockQty, decimal Price)? GetVariantStockAndPrice(int variantId);
+        DashboardStats GetDashboardStats(); //new
+        List<SalesOrderHeader> GetRecentOrders(int count = 5); //new
+        List<ChartDataPoint> GetSalesTrend(int months = 6); //new
+        List<ChartDataPoint> GetOrderStatusCounts(); //new
 
+        void UpdateNetAmountSafe(int orderId, decimal newNetAmount);
+        //  void UpdatePaymentInfoSafe(int orderId, decimal paidAmount, decimal dueAmount);
+        void UpdateTotalAmountSafe(int orderId, decimal newTotalAmount);
+
+        decimal GetProductTotalFromDetails(int orderId);
+
+        void UpdateOrderDeliveryCharge(int orderId, decimal newDeliveryCharge);
+
+        SalesOrderHeader GetBySalesOrderRef(string salesOrderRef);
+        SalesOrderHeader GetOrderTotalsSafe(int orderId);
+        List<Dictionary<string, object>> GetExportDataDynamic(string whereClause, List<string> columns);
+        bool GetConfirmedFlag(int orderId);
+        int GetOrderPageNumber(int orderId, int pageSize);
     }
 }
