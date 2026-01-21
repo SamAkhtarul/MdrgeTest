@@ -7,17 +7,19 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.SqlServer.Server;
 using System.Security.Claims;
-
+using MDUA.Web.UI.Services.Interface; 
 namespace MDUA.Web.UI.Controllers
 {
     public class AccountController : Controller
     {
         private readonly IUserLoginFacade _userLoginFacade;
-        private readonly IConfiguration _configuration; 
-        public AccountController(IUserLoginFacade userLoginFacade, IConfiguration configuration)
+        private readonly IConfiguration _configuration;
+        private readonly ITenantResolver _tenantResolver; 
+        public AccountController(IUserLoginFacade userLoginFacade, IConfiguration configuration, ITenantResolver tenantResolver)
         {
             _userLoginFacade = userLoginFacade;
             _configuration = configuration;
+            _tenantResolver = tenantResolver;
 
         }
 
@@ -41,10 +43,10 @@ namespace MDUA.Web.UI.Controllers
                 ViewBag.Error = "Please enter both username and password.";
                 return View();
             }
+            int currentCompanyId = _tenantResolver.GetCompanyId();
 
             // 2. Authenticate User via Facade
-            var loginResult = _userLoginFacade.GetUserLoginBy(username, password);
-
+            var loginResult = _userLoginFacade.GetUserLoginBy(username, password, currentCompanyId);
             if (loginResult.IsSuccess)
             {
                 var user = loginResult.UserLogin;

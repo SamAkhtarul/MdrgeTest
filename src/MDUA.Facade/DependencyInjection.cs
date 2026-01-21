@@ -43,6 +43,8 @@ namespace MDUA.Facade
             services.AddScoped<ISalesOrderDetailDataAccess, SalesOrderDetailDataAccess>();
             services.AddScoped<ICustomerDataAccess, CustomerDataAccess>();
             services.AddScoped<ICompanyCustomerDataAccess, CompanyCustomerDataAccess>();
+            services.AddScoped<ICompanyVendorDataAccess, CompanyVendorDataAccess>();
+
             services.AddScoped<IAddressDataAccess, AddressDataAccess>();
 
             // ✅ Purchase Facade Requirements (Inventory & POs)
@@ -74,7 +76,16 @@ namespace MDUA.Facade
 
             services.AddScoped<IEmailHistoryDataAccess, EmailHistoryDataAccess>();
             services.AddScoped<IEmailTemplateDataAccess, EmailTemplateDataAccess>();
+            services.AddScoped<IVendorPaymentDataAccess, VendorPaymentDataAccess>();
 
+            services.AddScoped<ICompanySubscriptionDataAccess, CompanySubscriptionDataAccess>();
+            services.AddScoped<ISubscriptionUsageDataAccess, SubscriptionUsageDataAccess>();
+            services.AddScoped<ISubscriptionPlanDataAccess, SubscriptionPlanDataAccess>();
+            services.AddScoped<IAttributeNameDataAccess, AttributeNameDataAccess>();
+            services.AddScoped<IAttributeValueDataAccess, AttributeValueDataAccess>();
+            services.AddScoped<ICmsPageDataAccess, CmsPageDataAccess>();
+            services.AddScoped<ICmsAssetDataAccess, CmsAssetDataAccess>();
+            services.AddScoped<IProductSEODataAccess, ProductSEODataAccess>();
 
             // Facade Layer
             services.AddServiceFacade();
@@ -84,8 +95,11 @@ namespace MDUA.Facade
 
         private static void AddServiceFacade(this IServiceCollection services)
         {
+            // ✅ FIX: Register HttpClient so SmsService can use it
+            services.AddHttpClient();
             services.AddScoped<IUserLoginFacade, UserLoginFacade>();
             services.AddScoped<IProductFacade, ProductFacade>();
+            services.AddScoped<IProductCategoryFacade, ProductCategoryFacade>();
             services.AddScoped<IOrderFacade, OrderFacade>();
             services.AddScoped<ICustomerFacade, CustomerFacade>();
             services.AddScoped<ICompanyFacade, CompanyFacade>();
@@ -96,13 +110,15 @@ namespace MDUA.Facade
             services.AddScoped<IDeliveryFacade, DeliveryFacade>();
             services.AddScoped<IVendorFacade, VendorFacade>();
 
+
             // ✅ ADDED THIS (Required for OrderController)
             services.AddScoped<IPaymentFacade, PaymentFacade>();
             services.AddScoped<ISmsService, SmsService>();
             services.AddScoped<IDeliveryStatusLogFacade, DeliveryStatusLogFacade>();
             services.AddScoped<IEmailService, EmailService>();
-
-
+            services.AddScoped<ISubscriptionSystemFacade, SubscriptionSystemFacade>();
+            services.AddScoped<IAttributeFacade, AttributeFacade>();
+            services.AddScoped<ICmsFacade, CmsFacade>();
 
         }
     }

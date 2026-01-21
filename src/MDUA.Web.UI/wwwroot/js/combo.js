@@ -3,60 +3,35 @@
 // ==================================================
 // 1. ORDER API HELPERS
 // ==================================================
-
 window.OrderAPI = {
-    // Check Customer Phone
     checkCustomer: async function (phone) {
         try {
             const response = await fetch(`/order/check-customer?phone=${phone}`);
             if (!response.ok) return { found: false };
             return await response.json();
-        } catch (e) {
-            console.error("API Error:", e);
-            return { found: false };
-        }
+        } catch (e) { return { found: false }; }
     },
-
-    // Check Postal Code
     checkPostalCode: async function (code) {
         try {
             const response = await fetch(`/order/check-postal-code?code=${code}`);
             if (!response.ok) return { found: false };
             return await response.json();
-        } catch (e) {
-            return { found: false };
-        }
+        } catch (e) { return { found: false }; }
     },
-
-    // Location Cascading
     getDivisions: async function () {
-        try {
-            const response = await fetch('/order/get-divisions');
-            return await response.json();
-        } catch (e) { return []; }
+        try { const r = await fetch('/order/get-divisions'); return await r.json(); } catch (e) { return []; }
     },
-
     getDistricts: async function (div) {
-        try {
-            const response = await fetch(`/order/get-districts?division=${div}`);
-            return await response.json();
-        } catch (e) { return []; }
+        try { const r = await fetch(`/order/get-districts?division=${div}`); return await r.json(); } catch (e) { return []; }
     },
-
     getThanas: async function (dist) {
-        try {
-            const response = await fetch(`/order/get-thanas?district=${dist}`);
-            return await response.json();
-        } catch (e) { return []; }
+        try { const r = await fetch(`/order/get-thanas?district=${dist}`); return await r.json(); } catch (e) { return []; }
     },
-
     getSubOffices: async function (thana) {
-        try {
-            const response = await fetch(`/order/get-suboffices?thana=${thana}`);
-            return await response.json();
-        } catch (e) { return []; }
+        try { const r = await fetch(`/order/get-suboffices?thana=${thana}`); return await r.json(); } catch (e) { return []; }
     }
 };
+
 // --- INITIALIZE COUNTRY CODE INPUT ---
 const input = document.querySelector("#customerPhone");
 const iti = window.intlTelInput(input, {
@@ -71,6 +46,34 @@ $(document).ready(function () {
     // stop here so we don't cause errors.
     if ($('#order-form').length === 0) {
         return;
+    }
+    // ==================================================
+    // HELPER: Force Scroll to Element (Fixes Sticky Header issues)
+    // ✅ MOVED HERE so the Submit Button can find it
+    // ==================================================
+    function forceScrollTo(element) {
+        if (!element || element.length === 0) return;
+
+        // 1. Get the DOM object
+        const domNode = element[0];
+
+        // 2. Calculate position: Absolute Top - Header Offset (150px)
+        const headerOffset = 150;
+        const elementPosition = domNode.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+
+        // 3. Scroll Manually
+        window.scrollTo({
+            top: offsetPosition,
+            behavior: "smooth"
+        });
+
+        // 4. Focus if it's an input (opens keyboard on mobile)
+        if (element.is('input, select, textarea')) {
+            setTimeout(() => {
+                element.focus({ preventScroll: true });
+            }, 300);
+        }
     }
 
     // ==================================================
@@ -115,25 +118,24 @@ $(document).ready(function () {
     }
 
     // Update Button Text based on selection
-    function updateSubmitButtonText() {
-        const $selected = $('.payment-option.selected');
-        const methodCode = $selected.data('payment'); // e.g. 'cod', 'bkash'
-        const mode = $selected.data('mode');          // 'Manual', 'Gateway'
-        const totalAmount = $('#receipt-grand-total').text();
+// Helper to update the Submit Button text dynamically
+    function updateSubmitButtonText(grandTotal) {
         const $btn = $('#final-submit-btn');
+        const $selectedCard = $('.payment-option.selected');
 
-        if (methodCode === 'cod') {
-            $btn.text('Confirm Order (Cash on Delivery)');
-        }
-        else if (mode === 'Manual') {
-            $btn.text('Verify & Confirm Order');
-        }
-        else {
-            // Gateway / Direct
-            $btn.text(`Pay ${totalAmount} Now`);
+        if ($selectedCard.length > 0) {
+            const methodCode = $selectedCard.data('payment'); // e.g. 'cod', 'bkash'
+            const mode = $selectedCard.data('mode');          // 'Manual', 'Gateway'
+
+            if (methodCode === 'cod') {
+                $btn.text('Confirm Order (Cash on Delivery)');
+            } else if (mode === 'Manual') {
+                $btn.text('Verify & Confirm Order');
+            } else {
+                $btn.text(`Pay Tk. ${Math.floor(grandTotal).toLocaleString()} Now`);
+            }
         }
     }
-
     // Initialize on page load (to handle default selection)
     handlePaymentUI();
 
@@ -191,17 +193,17 @@ $(document).ready(function () {
     // ==================================================
     // 4. AUTO-SELECT FIRST VARIANT IF ONLY ONE EXISTS
     // ==================================================
-    const variants = (window.productVariants || []).filter(v => v);
-    if (variants.length === 1) {
-        const singleVariant = variants[0];
-        applyVariantData(singleVariant);
-        $('.variant-chip').addClass('selected');
-
-        // Populate selectedAttributes for the single variant
-        if (singleVariant.attributes) {
-            selectedAttributes = { ...singleVariant.attributes };
-        }
-    }
+    // const variants = (window.productVariants || []).filter(v => v);
+    // if (variants.length === 1) {
+    //     const singleVariant = variants[0];
+    //     applyVariantData(singleVariant);
+    //     $('.variant-chip').addClass('selected');
+    //
+    //     // Populate selectedAttributes for the single variant
+    //     if (singleVariant.attributes) {
+    //         selectedAttributes = { ...singleVariant.attributes };
+    //     }
+    // }
 
     // ==================================================
     // 5. DYNAMIC ATTRIBUTE SELECTION LOGIC (WITH CASCADING)
@@ -267,48 +269,48 @@ $(document).ready(function () {
             handleNoMatch();
         }
     }    // --- NEW CASCADING LOGIC FUNCTION ---
-    function updateAttributeAvailability() {
-        $('.variant-chip').each(function () {
-            const $chip = $(this);
-            const chipAttribute = $chip.data('attribute');
-
-            // CHANGE: Use .attr() to ensure String comparison
-            const chipValue = $chip.attr('data-value');
-
-            // Skip if this specific chip is already selected
-            if ($chip.hasClass('selected')) {
-                $chip.removeClass('disabled');
-                return;
-            }
-
-            // Create a "Test Scenario"
-            const testSelection = { ...selectedAttributes };
-
-            // Allow switching values within the same attribute group
-            delete testSelection[chipAttribute];
-            testSelection[chipAttribute] = chipValue;
-
-            // Check if ANY variant matches this test scenario
-            const isCompatible = variants.some(v => {
-                for (const [key, val] of Object.entries(testSelection)) {
-                    // CHANGE: Convert both sides to String() before comparing
-                    if (!v.attributes || String(v.attributes[key]) !== String(val)) {
-                        return false;
-                    }
-                }
-                return true;
-            });
-
-            // Apply visual state
-            if (isCompatible) {
-                $chip.removeClass('disabled');
-            } else {
-                $chip.addClass('disabled');
-            }
-        });
-    }
+    // function updateAttributeAvailability() {
+    //     $('.variant-chip').each(function () {
+    //         const $chip = $(this);
+    //         const chipAttribute = $chip.data('attribute');
+    //
+    //         // CHANGE: Use .attr() to ensure String comparison
+    //         const chipValue = $chip.attr('data-value');
+    //
+    //         // Skip if this specific chip is already selected
+    //         if ($chip.hasClass('selected')) {
+    //             $chip.removeClass('disabled');
+    //             return;
+    //         }
+    //
+    //         // Create a "Test Scenario"
+    //         const testSelection = { ...selectedAttributes };
+    //
+    //         // Allow switching values within the same attribute group
+    //         delete testSelection[chipAttribute];
+    //         testSelection[chipAttribute] = chipValue;
+    //
+    //         // Check if ANY variant matches this test scenario
+    //         const isCompatible = variants.some(v => {
+    //             for (const [key, val] of Object.entries(testSelection)) {
+    //                 // CHANGE: Convert both sides to String() before comparing
+    //                 if (!v.attributes || String(v.attributes[key]) !== String(val)) {
+    //                     return false;
+    //                 }
+    //             }
+    //             return true;
+    //         });
+    //
+    //         // Apply visual state
+    //         if (isCompatible) {
+    //             $chip.removeClass('disabled');
+    //         } else {
+    //             $chip.addClass('disabled');
+    //         }
+    //     });
+    // }
     // Call once on load to initialize states
-    updateAttributeAvailability();
+    // updateAttributeAvailability();
 
     function findAndApplyVariant() {
         $('#selected-variant-id').val('');
@@ -342,40 +344,42 @@ $(document).ready(function () {
         } else {
             handleNoMatch();
         }
-    } function applyVariantData(variant) {
-        $('#selected-variant-id').val(variant.id);
-        currentVariantPrice = variant.price;
-        $('#display-price').text('Tk. ' + currentVariantPrice.toLocaleString());
-
-        // Handle stock properly
-        maxAvailableStock = variant.stock;
-
-        let currentQty = parseInt($('#quantity').val()) || 1;
-        if (maxAvailableStock > 0 && currentQty > maxAvailableStock) {
-            $('#quantity').val(maxAvailableStock);
-        }
-        updateStockMessage(maxAvailableStock);
-
-        // 1. Determine the image URL
-        let newImg = variant.image && variant.image.length > 1 ? variant.image : baseProductImageUrl;
-
-        // 2. Fix Slash logic (Don't add slash if image is missing)
-        if (newImg && newImg.length > 0 && !newImg.startsWith("/") && !newImg.startsWith("http")) {
-            newImg = "/" + newImg;
-        }
-
-        // 3. Update Image Src AND Force Visibility
-        // We use .show() to undo the 'display:none' set by the onerror event
-        $('#order-variant-image').attr('src', newImg).show();
-        $('#mobile-order-variant-image').attr('src', newImg).show();
-
-        $('.variant-chips-container').css('border', 'none');
-        updateTotals();
-
-        if (!isCheckingEmail && !$('#email-status').is(':visible')) {
-            $('.submit-btn').prop('disabled', false);
-        }
     }
+
+    // function applyVariantData(variant) {
+    //     $('#selected-variant-id').val(variant.id);
+    //     currentVariantPrice = variant.price;
+    //     $('#display-price').text('Tk. ' + currentVariantPrice.toLocaleString());
+    //
+    //     // Handle stock properly
+    //     maxAvailableStock = variant.stock;
+    //
+    //     let currentQty = parseInt($('#quantity').val()) || 1;
+    //     if (maxAvailableStock > 0 && currentQty > maxAvailableStock) {
+    //         $('#quantity').val(maxAvailableStock);
+    //     }
+    //     updateStockMessage(maxAvailableStock);
+    //
+    //     // 1. Determine the image URL
+    //     let newImg = variant.image && variant.image.length > 1 ? variant.image : baseProductImageUrl;
+    //
+    //     // 2. Fix Slash logic (Don't add slash if image is missing)
+    //     if (newImg && newImg.length > 0 && !newImg.startsWith("/") && !newImg.startsWith("http")) {
+    //         newImg = "/" + newImg;
+    //     }
+    //
+    //     // 3. Update Image Src AND Force Visibility
+    //     // We use .show() to undo the 'display:none' set by the onerror event
+    //     $('#order-variant-image').attr('src', newImg).show();
+    //     $('#mobile-order-variant-image').attr('src', newImg).show();
+    //
+    //     $('.variant-chips-container').css('border', 'none');
+    //     updateTotals();
+    //
+    //     if (!isCheckingEmail && !$('#email-status').is(':visible')) {
+    //         $('.submit-btn').prop('disabled', false);
+    //     }
+    // }
 
     function resetToDefault() {
         currentVariantPrice = baseInfo.price;
@@ -472,12 +476,13 @@ $(document).ready(function () {
         }
 
         // 3. Format Validation
+        // 3. Format Validation
         if (!email.includes('@')) {
             $msg.text("⚠ Please enter a valid email address").css('color', 'orange').show();
-            $('.submit-btn').prop('disabled', false).text('Confirm Order');
+            // Change text to 'Fix Email'
+            $('.submit-btn').prop('disabled', false).text('Fix Email');
             return;
         }
-
         isCheckingEmail = true;
         $msg.text("⏳ Checking email...").css('color', 'blue').show();
         $('.submit-btn').prop('disabled', true).text('Verifying...');
@@ -491,13 +496,11 @@ $(document).ready(function () {
             isCheckingEmail = false;
 
             if (res.exists) {
-                // If backend returns true, it effectively means "Conflict with ANOTHER user"
-                // because we handled the "Same User" case in the C# controller.
-
                 $msg.text("⚠ This email is already registered with a different phone number.").css('color', 'red').show();
-                $('.submit-btn').prop('disabled', true).text('Fix Email');
+
+                // ✅ FIX: Keep button ENABLED so user can click it to be redirected
+                $('.submit-btn').prop('disabled', false).text('Fix Email');
             } else {
-                // Email is available OR belongs to this user -> OK
                 $msg.text("✓ Email available").css('color', 'green').show();
                 $('.submit-btn').prop('disabled', false).text('Confirm Order');
             }
@@ -564,7 +567,7 @@ $(document).ready(function () {
             if (errorCode === 3) {
                 $('#phone-status').text("⚠ Number too long").css('color', 'red');
             }
-            // 2. If Too Short (2) or just Invalid (1), DO NOT complain yet. 
+                // 2. If Too Short (2) or just Invalid (1), DO NOT complain yet. 
             //    Wait for them to finish typing (handled in 'blur').
             else {
                 $('#phone-status').text("");
@@ -720,355 +723,362 @@ $(document).ready(function () {
         }
     });
 
+// ==================================================
+    // 4. CORE LOGIC: UPDATE RECEIPT & TOTALS
+    // ==================================================
+// ==================================================
+// CORE LOGIC: UPDATE RECEIPT & TOTALS
+// ==================================================
+// ==================================================
+// UPDATED TOTALS LOGIC FOR RECEIPT
+// ==================================================
+
     function updateTotals() {
-        let qty = parseInt($('#quantity').val()) || 1;
-        let subtotal = currentVariantPrice * qty;
-        let deliveryCost = parseFloat($('#receipt-delivery').data('cost')) || 0;
-        let total = subtotal + deliveryCost;
+        let subtotal = 0;
+        let receiptHtml = "";
 
-        $('#summary-qty').text(qty);
-        $('#summary-subtotal').text('Tk. ' + subtotal.toLocaleString());
-        $('#receipt-grand-total').text('Tk. ' + total.toLocaleString());
+        // 1. Loop through all checked variant checkboxes
+        $('.variant-select-chk:checked').each(function() {
+            const $card = $(this).closest('.variant-row-card');
+            const name = $(this).data('name');
+            const price = parseFloat($(this).data('price')) || 0;
+            const qty = parseInt($card.find('.row-qty-input').val()) || 1;
+
+            const lineTotal = price * qty;
+            subtotal += lineTotal;
+
+            // Add row to the receipt summary
+            receiptHtml += `
+            <tr>
+                <td>${name}</td>
+                <td style="text-align: center;">${qty}</td>
+                <td style="text-align: right;">Tk. ${lineTotal.toLocaleString()}</td>
+            </tr>`;
+        });
+
+        // 2. Update the Receipt UI table body
+        if (receiptHtml === "") {
+            $('#receipt-body').html('<tr><td colspan="3" style="text-align:center; color:#999;">No items selected</td></tr>');
+        } else {
+            $('#receipt-body').html(receiptHtml);
+        }
+
+        // 3. Handle Delivery and Grand Total
+        const deliveryCharge = parseFloat($('#receipt-delivery').data('cost')) || 0;
+        const grandTotal = subtotal + deliveryCharge;
+
+        // 4. Update the visual totals in the receipt
+        $('#receipt-grand-total').text('Tk. ' + grandTotal.toLocaleString());
+
+        // 5. Update the dynamic Submit Button text (if applicable)
+        if (typeof updateSubmitButtonText === "function") {
+            updateSubmitButtonText(grandTotal);
+        }
     }
-
+// ==================================================
+// EVENT LISTENERS FOR QUANTITY AND SELECTION
+// ==================================================
+//     $(document).ready(function () {
+//         // Checkbox Change
+//         $(document).on('change', '.variant-select-chk', function() {
+//             updateTotals();
+//         });
+//
+//         // Quantity Plus/Minus Buttons
+//         $(document).on('click', '.row-qty-btn', function() {
+//             const $input = $(this).siblings('.row-qty-input');
+//             let val = parseInt($input.val());
+//             const max = parseInt($input.attr('max'));
+//
+//             if ($(this).hasClass('plus')) {
+//                 if (val < max) val++;
+//             } else {
+//                 if (val > 1) val--;
+//             }
+//
+//             $input.val(val);
+//             updateTotals(); // Trigger live update
+//         });
+//     });    
+    // Helper: Format Currency
+    function formatCurrency(amount) {
+        return 'Tk. ' + Math.floor(amount).toLocaleString();
+    }
     // ==================================================
     // 8. QUANTITY CONTROLS
     // ==================================================
 
-    $('#increase').click(function (e) {
-        e.preventDefault();
-        clearStockError();
+    // ==================================================
+    // 8. QUANTITY CONTROLS
+    // ==================================================
+    // A. Checkbox Toggle
+    // ==================================================
+    // 8. QUANTITY & CHECKBOX CONTROLS (Correct Location)
+    // ==================================================
 
-        let qty = parseInt($('#quantity').val()) || 1;
-        let variantId = $('#selected-variant-id').val();
+    // 
+    // ==================================================
+    // 8. QUANTITY CONTROLS & REAL-TIME STOCK UPDATE
+    // ==================================================
 
-        // Case 1: No variants exist (simple product)
-        if (variants.length === 0) {
-            if (qty < 99) {
-                $('#quantity').val(qty + 1);
-                $('#summary-qty').text(qty + 1);
-                updateTotals();
+    // 1. Function to recalculate stock text (e.g., 30 - 2 = 28)
+    function updateRealTimeStock($row) {
+        var $stockSpan = $row.find('.dynamic-stock');
+        var $qtyInput = $row.find('.row-qty-input');
+
+        // Get the Total Stock Limit from the HTML attribute we added
+        var maxStock = parseInt($stockSpan.data('max')) || 0;
+        var currentQty = parseInt($qtyInput.val()) || 1;
+
+        // LOGIC: Available = Max - Quantity in Cart
+        var remaining = maxStock - currentQty;
+
+        // Safety check
+        if (remaining < 0) remaining = 0;
+
+        // Update the text on the screen
+        if ($stockSpan.length > 0 && maxStock > 0) {
+            $stockSpan.text('(Stock: ' + remaining + ')');
+
+            // Turn text RED if stock hits 0
+            if (remaining === 0) {
+                $stockSpan.css('color', '#dc3545');
             } else {
-                showStockError('Maximum quantity: 99 items');
+                $stockSpan.css('color', '#777');
             }
-            return;
         }
+    }
 
-        // Case 2: Variants exist but none selected
-        if (!variantId) {
-            showStockError('⚠️ Please select product options first');
-            $('.variant-chips-container').css({
-                'border': '2px solid #ff6b6b',
-                'padding': '10px',
-                'border-radius': '8px'
-            });
-            setTimeout(() => {
-                $('.variant-chips-container').css('border', 'none');
-            }, 2000);
-            return;
-        }
-
-        // Case 3: Variant selected - check stock
-        if (maxAvailableStock > 0) {
-            if (qty < maxAvailableStock) {
-                $('#quantity').val(qty + 1);
-                $('#summary-qty').text(qty + 1);
-                updateTotals();
-            } else {
-                showStockError(`Maximum available: ${maxAvailableStock} items`);
-                $('#quantity').val(maxAvailableStock);
-            }
+    // 2. Event: Checkbox Changed
+    $(document).on('change', '.variant-select-chk', function () {
+        const $row = $(this).closest('.variant-row-card');
+        if ($(this).is(':checked')) {
+            $row.css('border-color', '#2ebf91').css('background-color', '#f0fdf4');
         } else {
-            showStockError('This item is currently out of stock');
+            $row.css('border-color', '#e0e0e0').css('background-color', '#fff');
         }
-    });
-
-    $('#decrease').click(function (e) {
-        e.preventDefault();
-        clearStockError();
-
-        let qty = parseInt($('#quantity').val()) || 1;
-
-        if (qty > 1) {
-            $('#quantity').val(qty - 1);
-            $('#summary-qty').text(qty - 1);
-            updateTotals();
-        } else {
-            showStockError('Minimum quantity is 1');
-        }
-    });
-
-    $('#quantity').on('input change', function () {
-        let qty = parseInt($(this).val()) || 1;
-
-        $(this).val(qty);
-
-        if (qty < 1) {
-            $(this).val(1);
-            showStockError('Minimum quantity is 1');
-            return;
-        }
-
-        if (maxAvailableStock > 0 && qty > maxAvailableStock) {
-            $(this).val(maxAvailableStock);
-            showStockError(`Maximum available: ${maxAvailableStock} items`);
-            return;
-        }
-
-        if (qty > 99) {
-            $(this).val(99);
-            showStockError('Maximum quantity: 99 items');
-            return;
-        }
-
-        $('#summary-qty').text(qty);
         updateTotals();
     });
 
-    $('#quantity').on('keypress', function (e) {
-        if (e.which < 48 || e.which > 57) {
-            e.preventDefault();
+    // 3. Event: Row Click (Selects product)
+    $(document).on('click', '.variant-row-card', function (e) {
+        // Ignore clicks on inputs/buttons/images
+        if ($(e.target).closest('.variant-select-chk, .row-qty-btn, input, img').length) return;
+
+        const $chk = $(this).find('.variant-select-chk');
+        $chk.prop('checked', !$chk.is(':checked')).trigger('change');
+    });
+
+    // 4. Event: User Types Quantity Manually
+    $(document).on('input change', '.row-qty-input', function () {
+        const $row = $(this).closest('.variant-row-card');
+        const $chk = $row.find('.variant-select-chk');
+
+        let val = parseInt($(this).val());
+        const maxStock = parseInt($chk.data('stock')) || 999;
+
+        if(isNaN(val) || val < 1) $(this).val(1);
+        if(val > maxStock) $(this).val(maxStock);
+
+        // ✅ UPDATE STOCK TEXT HERE
+        updateRealTimeStock($row);
+
+        if (!$chk.is(':checked')) {
+            $chk.prop('checked', true).trigger('change');
+        } else {
+            updateTotals();
         }
     });
 
-    // ==================================================
-    // 9. SUBMIT ORDER (MERGED VALIDATION & PAYMENTS)
-    // ==================================================
+    // 5. Event: Plus / Minus Buttons Clicked
+    $(document).off('click', '.row-qty-btn').on('click', '.row-qty-btn', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
 
-    // ==================================================
-    // 9. SUBMIT ORDER (MERGED VALIDATION & PAYMENTS)
-    // ==================================================
+        const $btn = $(this);
+        const $row = $btn.closest('.variant-row-card');
+        const $input = $row.find('.row-qty-input');
+        const $checkbox = $row.find('.variant-select-chk');
 
-    // ==================================================
-    // 9. SUBMIT ORDER (MERGED VALIDATION & PAYMENTS)
-    // ==================================================
+        let currentVal = parseInt($input.val()) || 0;
+        const maxStock = parseInt($checkbox.data('stock')) || 999;
 
-$('#order-form').submit(function (e) {
-    e.preventDefault();
-    
-    // ============================================================
-    // 1. EXISTING VALIDATIONS (UNTOUCHED)
-    // ============================================================
-    
-    // Capture form reference to use inside SweetAlert later
-    var $form = $(this); 
-
-    if (!iti.isValidNumber()) {
-        Swal.fire('Error', 'Please enter a valid phone number for the selected country.', 'error');
-        return;
-    }
-    // 1. Reset previous error styles
-    $('.input-error').removeClass('input-error');
-    $('.variant-chips-container').css({ 'border': 'none', 'padding': '0' });
-
-    // 2. CHECK: Is Email check pending?
-    if (isCheckingEmail) {
-        Swal.fire({
-            title: 'Please wait',
-            text: 'Validating email address...',
-            icon: 'info',
-            timer: 1500,
-            showConfirmButton: false
-        });
-        return;
-    }
-
-    // 3. CHECK: Email Error Visible
-    const $emailStatus = $('#email-status');
-    if ($emailStatus.is(':visible') && $emailStatus.css('color') === 'rgb(255, 0, 0)') {
-        $('html, body').animate({ scrollTop: $('#customerEmail').offset().top - 120 }, 300);
-        $('#customerEmail').focus();
-        return;
-    }
-
-    // 4. CHECK: Variant Selected
-    let isValid = true;
-    let firstErrorField = null;
-
-    if (!$('#selected-variant-id').val()) {
-        isValid = false;
-        const $variantContainer = $('.variant-chips-container');
-        $variantContainer.css({
-            'border': '2px solid #dc3545',
-            'padding': '5px',
-            'border-radius': '5px'
-        });
-        firstErrorField = $(".variant-selection-area");
-    }
-
-    // 5. CHECK: General Required Fields
-    $form.find('input[required], select[required], textarea[required]')
-        .filter(':visible')
-        .each(function () {
-            if ($(this).prop('disabled')) return;
-            if (!$(this).val() || $(this).val().trim() === "") {
-                isValid = false;
-                $(this).addClass('input-error');
-                if (!firstErrorField) firstErrorField = $(this);
-            }
-        });
-
-    // 6. IF INVALID: Scroll to error
-    if (!isValid || firstErrorField) {
-        if (firstErrorField && firstErrorField.length) {
-            const elementTop = firstErrorField[0].getBoundingClientRect().top + window.scrollY;
-            $('html, body').animate({ scrollTop: elementTop - 120 }, 600);
-        }
-        return; // STOP HERE IF INVALID
-    }
-
-    // 7. CHECK: Stock Limits
-    let requestedQty = parseInt($('#quantity').val());
-    if (maxAvailableStock > 0 && requestedQty > maxAvailableStock) {
-        $('#stock-error-message').text(`ERROR: Requested quantity exceeds limit.`);
-        return;
-    }
-
-    // --- PAYMENT METHOD & MODE LOGIC ---
-    const $selectedCard = $('.payment-option.selected');
-    const correctMethodCode = $selectedCard.data('payment');
-    const mode = $selectedCard.data('mode');
-
-    // 8. Validation: Manual Mode MUST have a TrxID
-    if (mode === 'Manual') {
-        const trxId = $('#trx-id-input').val().trim();
-        if (!trxId) {
-            Swal.fire('Required', 'Please enter the Transaction ID (TrxID).', 'warning');
-            $('#trx-id-input').focus().addClass('input-error');
-            return; // Stop submission
-        }
-    }
-
-    // ============================================================
-    // ✅ NEW STEP: CONFIRMATION ALERT
-    // ============================================================
-    Swal.fire({
-        title: 'Confirm Order?',
-        text: "Are you sure you want to place this order?",
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonColor: '#2ebf91', // Matches your theme
-        cancelButtonColor: '#d33',
-        confirmButtonText: 'Yes, Place Order',
-        cancelButtonText: 'Cancel'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            
-            // ============================================================
-            // 🧱 EXECUTE YOUR EXISTING SUBMISSION LOGIC HERE
-            // ============================================================
-
-            // --- PREPARE DATA ---
-            let formData = {};
-            // Note: Use $form instead of $(this) because inside .then(), 'this' changes context
-            $form.serializeArray().forEach(item => formData[item.name] = item.value);
-
-            // ✅ ROBUST DELIVERY CHARGE CAPTURE
-            let deliveryCost = parseFloat($('#receipt-delivery').data('cost'));
-
-            if (isNaN(deliveryCost) || deliveryCost === 0) {
-                const dist = $('#district-select').val();
-                if (dist && (dist.toLowerCase().includes('dhaka') || dist.trim() === 'Dhaka')) {
-                    deliveryCost = delivery.dhaka;
-                } else {
-                    deliveryCost = delivery.outside;
-                }
-            }
-
-            formData.DeliveryCharge = deliveryCost; 
-
-            // Apply Payment Values
-            formData.PaymentMethod = correctMethodCode;
-            formData.CustomerPhone = iti.getNumber();
-            formData.PaymentMode = mode;
-
-            if (mode === 'Manual') {
-                formData.TransactionReference = $('#trx-id-input').val();
-            }
-
-            // Ensure numeric types
-            formData.TargetCompanyId = 1;
-            formData.ProductVariantId = parseInt(formData.ProductVariantId);
-            formData.OrderQuantity = parseInt(formData.OrderQuantity);
-            
-            // Disable Button
-            let $btn = $('#final-submit-btn');
-            $btn.prop('disabled', true);
-
-            // Update text based on payment
-            if (formData.PaymentMode === 'Gateway') {
-                $btn.text('Redirecting...');
+        if ($btn.hasClass('plus')) {
+            if (currentVal < maxStock) {
+                $input.val(currentVal + 1);
             } else {
-                $btn.text('Processing...');
-            }
-
-            // 
-            // SEND TO SERVER
-            $.ajax({
-                url: '/order/place',
-                type: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify(formData),
-                success: function (res) {
-                    if (res.success) {
-                        // 1. HANDLE COD / MANUAL PAYMENT
-                        if (formData.PaymentMethod === 'cod' || formData.PaymentMode === 'Manual') {
-                            showOrderSuccessAlert(
-                                res.orderId || 'PENDING',
-                                formData.CustomerName,
-                                formData.CustomerPhone
-                            );
-                        }
-                        // 2. HANDLE ONLINE PAYMENT GATEWAY
-                        else {
-                            if (res.paymentUrl) {
-                                window.location.href = res.paymentUrl;
-                            } else {
-                                Swal.fire({
-                                    title: 'Payment Pending',
-                                    text: 'Order created. Redirecting to payment...',
-                                    icon: 'info',
-                                    showConfirmButton: false,
-                                    timer: 2000
-                                }).then(() => {
-                                    window.location.reload();
-                                });
-                            }
-                        }
-                    }
-                    // 3. SERVER RETURNED FALSE
-                    else {
-                        Swal.fire({
-                            title: 'Order Failed',
-                            text: res.message || "Failed to place order.",
-                            icon: 'error',
-                            confirmButtonText: 'Try Again'
-                        });
-                        $btn.prop('disabled', false);
-                        updateSubmitButtonText();
-                    }
-                },
-                error: function (xhr) {
-                    let errorMessage = "Network Error.";
-                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                        errorMessage = xhr.responseJSON.message;
-                    } else if (xhr.responseText) {
-                        errorMessage = xhr.responseText.substring(0, 200);
-                    }
-
-                    Swal.fire({
-                        title: 'Server Error',
-                        text: errorMessage,
-                        icon: 'error',
-                        confirmButtonText: 'Close'
-                    });
-                    $btn.prop('disabled', false);
-                    updateSubmitButtonText();
+                if(typeof Swal !== 'undefined') {
+                    Swal.fire({ toast: true, icon: 'warning', title: `Max Stock: ${maxStock}`, position: 'top-end', timer: 1500, showConfirmButton: false });
                 }
-            });
+            }
+        } else {
+            if (currentVal > 1) {
+                $input.val(currentVal - 1);
+            }
+        }
+
+        // ✅ CRITICAL: UPDATE STOCK TEXT HERE IMMEDIATELY
+        updateRealTimeStock($row);
+
+        // Auto-select checkbox
+        if (!$checkbox.is(':checked')) {
+            $checkbox.prop('checked', true).trigger('change');
+        } else {
+            updateTotals();
         }
     });
-});    // ==================================================
+    
+    // ==================================================
+    // 9. SUBMIT ORDER (MERGED VALIDATION & PAYMENTS)
+    // ==================================================
+
+    // ==================================================
+    // 9. SUBMIT ORDER (MERGED VALIDATION & PAYMENTS)
+    // ==================================================
+
+    // ==================================================
+    // 9. SUBMIT ORDER (MERGED VALIDATION & PAYMENTS)
+    // ==================================================
+
+// ==================================================
+    // 6. SUBMIT ORDER
+    // ==================================================
+    $('#order-form').submit(function (e) {
+        e.preventDefault();
+        var $form = $(this);
+
+        // 1. Phone Check
+        if (typeof iti !== 'undefined' && iti && !iti.isValidNumber()) {
+            Swal.fire('Error', 'Please enter a valid phone number.', 'error');
+            forceScrollTo($('#customerPhone'));
+            return;
+        }
+
+        // 2. Gather Items from Checkboxes
+        const selectedItems = [];
+        $('.variant-select-chk:checked').each(function () {
+            const $row = $(this).closest('.variant-row-card');
+            selectedItems.push({
+                ProductVariantId: parseInt($(this).val()),
+                OrderQuantity: parseInt($row.find('.row-qty-input').val()) || 1
+            });
+        });
+
+        if (selectedItems.length === 0) {
+            $('#variant-error-msg').show();
+            forceScrollTo($('.variant-list-section'));
+            return;
+        }
+
+        // 3. Required Fields Validation (Redirects to Error)
+        let isValid = true;
+        let firstError = null;
+        $form.find('input[required], select[required], textarea[required]').each(function () {
+            if ($(this).is(':visible') && (!$(this).val() || $(this).val().trim() === "")) {
+                isValid = false;
+                $(this).css('border', '1px solid red');
+                if(!firstError) firstError = $(this);
+            } else {
+                $(this).css('border', '');
+            }
+        });
+
+        if (!isValid) {
+            if(firstError) forceScrollTo(firstError);
+            return;
+        }
+
+        // 4. Confirm & Submit
+        Swal.fire({
+            title: 'Confirm Order?',
+            text: "Are you sure you want to place this order?",
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#2ebf91',
+            confirmButtonText: 'Yes, Place Order'
+        }).then((result) => {
+            if (result.isConfirmed) {
+
+                // --- PREPARE DATA ---
+                let formData = {};
+                $form.serializeArray().forEach(item => formData[item.name] = item.value);
+                if (typeof iti !== 'undefined' && iti) formData.CustomerPhone = iti.getNumber();
+
+                // Payment Info
+                const $selectedCard = $('.payment-option.selected');
+                formData.PaymentMethod = $selectedCard.data('payment');
+                formData.PaymentMode = $selectedCard.data('mode');
+                if (formData.PaymentMode === 'Manual') formData.TransactionReference = $('#trx-id-input').val();
+
+                // Financials & Items
+                formData.DeliveryCharge = parseFloat($('#receipt-delivery').data('cost')) || 0;
+                formData.OrderItems = selectedItems; // List of items
+
+                // Legacy Fallback (Send first item for older backends)
+                formData.ProductVariantId = selectedItems[0].ProductVariantId;
+                formData.OrderQuantity = selectedItems[0].OrderQuantity;
+
+                // Send Request
+                let $btn = $('#final-submit-btn');
+                $btn.prop('disabled', true).text('Processing...');
+
+                $.ajax({
+                    url: '/order/place',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(formData),
+
+                    success: function (res) {
+                        console.log('Response:', res);
+
+                        var isSuccess =
+                            res &&
+                            (
+                                res.success === true ||
+                                res.Success === true ||
+                                res.success === 1 ||
+                                res.success === "true"
+                            );
+
+                        if (isSuccess) {
+                            // --- NEW CODE START ---
+                            // 1. Attempt to find the Order ID in the response
+                            // Adjust these keys based on what your API actually returns (e.g., res.data.id, res.orderId)
+                            var newOrderId = res.orderId || res.OrderId || res.id || res.Id || (res.data ? res.data.id : null);
+
+                            if (newOrderId) {
+                                // 2. Set a short-lived cookie (60 seconds) to carry the ID to the next page
+                                document.cookie = "CurrentOrderId=" + newOrderId + "; path=/; max-age=60";
+                            }
+                            // --- NEW CODE END ---
+
+                            window.location.href = '/order/confirmation';
+                        } else {
+                            Swal.fire(
+                                'Failed',
+                                res && res.message ? res.message : 'Order Failed',
+                                'error'
+                            );
+                            $btn.prop('disabled', false);
+                            updateTotals();
+                        }
+                    }                    
+                    ,
+                    error: function (xhr) {
+                        let msg =
+                            xhr.responseJSON && xhr.responseJSON.message
+                                ? xhr.responseJSON.message
+                                : 'Network Error';
+
+                        Swal.fire('Error', msg, 'error');
+
+                        $btn.prop('disabled', false);
+                        updateTotals();
+                    }
+                });            }
+        });
+    });
+    // ==================================================
     // 10. IMAGE GALLERY SLIDER
     // ==================================================
     let currentSlide = 0;
@@ -1089,57 +1099,71 @@ $('#order-form').submit(function (e) {
 // ==================================================
 // 11. POSTAL CODE AUTOFILL (AUTOMATIC)
 // ==================================================
-$('input[name="PostalCode"]').on('input keyup blur', function () {
-    let code = $(this).val().trim();
+// ==================================================
+// 11. POSTAL CODE AUTOFILL (AUTOMATIC)
+// ==================================================
+//$('input[name="PostalCode"]').on('input keyup blur', function () {
+//    let code = $(this).val().trim();
+//    let $input = $(this);
+//    let $status = $('#postal-status'); // The new message container
 
-    if (code.length === 4) {
-        let $input = $(this);
-        $input.css('border-color', '#3498db');
+//    // 1. Reset state while typing or if empty
+//    if (code.length < 4) {
+//        $input.css('border-color', ''); // Reset border
+//        $status.hide(); // Hide message
+//        return;
+//    }
 
-        $.get('/order/check-postal-code', { code: code }, function (data) {
-            if (data.found) {
-                $input.css('border-color', '#2ecc71');
+//    // 2. Trigger check when 4 digits are entered
+//    if (code.length === 4) {
+//        $input.css('border-color', '#3498db'); // Blue (Loading)
+//        $status.text("Checking...").css('color', '#3498db').show();
 
-                // 1. Set Hidden Division
-                $('#hidden-division').val(data.division);
+//        $.get('/order/check-postal-code', { code: code }, function (data) {
+//            if (data.found) {
+//                // SUCCESS: Found in DB
+//                $input.css('border-color', '#2ecc71'); // Green
+//                $status.text("✓ Location found").css('color', '#2ecc71').show();
 
-                // 2. Set District Directly (No timeout needed anymore)
-                let $distSelect = $('#district-select');
-                $distSelect.val(data.district).trigger('change');
+//                // --- Existing Autofill Logic ---
+//                $('#hidden-division').val(data.division);
+//                let $distSelect = $('#district-select');
+//                $distSelect.val(data.district).trigger('change');
 
-                // 3. Load Thana and Suboffice (Keep timeout slightly to allow Thana API to load after District change triggers)
-                setTimeout(() => {
-                    if (data.thana) {
-                        let $thanaSelect = $('#thana-select');
-                        // Force load the specific thana option immediately
-                        $thanaSelect.empty()
-                            .append(`<option value="${data.thana}" selected>${data.thana}</option>`)
-                            .prop('disabled', false);
+//                setTimeout(() => {
+//                    if (data.thana) {
+//                        let $thanaSelect = $('#thana-select');
+//                        $thanaSelect.empty()
+//                            .append(`<option value="${data.thana}" selected>${data.thana}</option>`)
+//                            .prop('disabled', false)
+//                            .trigger('change');
+//                    }
+//                    setTimeout(() => {
+//                        if (data.subOffice) {
+//                            let $subSelect = $('#suboffice-select');
+//                            $subSelect.empty()
+//                                .append(`<option value="${data.subOffice}" selected>${data.subOffice}</option>`);
+//                            $subSelect.find(':selected').data('code', code);
+//                            $subSelect.prop('disabled', false);
+//                        }
+//                    }, 300);
+//                }, 500);
 
-                        // Trigger change to load suboffices
-                        $thanaSelect.trigger('change');
-                    }
+//            } else {
+//                // ERROR: Not found in DB
+//                $input.css('border-color', '#e74c3c'); // Red
+//                $status.text("⚠ Postal code not found. Please select location manually.")
+//                    .css('color', '#e74c3c')
+//                    .show();
+//            }
+//        }).fail(function () {
+//            // Handle Network/Server Error
+//            $input.css('border-color', '#e74c3c');
+//            $status.text("⚠ Error checking code").css('color', '#e74c3c').show();
+//        });
+//    }
+//});
 
-                    // 4. Load SubOffice
-                    setTimeout(() => {
-                        if (data.subOffice) {
-                            let $subSelect = $('#suboffice-select');
-                            $subSelect.empty()
-                                .append(`<option value="${data.subOffice}" selected>${data.subOffice}</option>`);
-
-                            $subSelect.find(':selected').data('code', code);
-                            $subSelect.prop('disabled', false);
-                        }
-                    }, 300); // Small delay for SubOffice API
-
-                }, 500); // Delay for Thana API (triggered by district change)
-
-            } else {
-                $input.css('border-color', '#e74c3c');
-            }
-        });
-    }
-});
 /* =========================================================
     (Customer Chat Logic)
    ========================================================= */
@@ -1153,8 +1177,38 @@ $(document).ready(function () {
 
     const ONE_HOUR = 60 * 60 * 1000;
 
+
+    // SAFETY CHECK: If we are on the Admin page...
+    if ($('#order-form').length === 0) {
+        return;
+    }
+
+    // ==================================================
+    // HELPER: Force Scroll to Element (Fixes Sticky Header issues)
+    // ✅ MOVED HERE so the Submit Button can find it
+    // ==================================================
+    function forceScrollTo(element) {
+        if (!element || element.length === 0) return;
+
+        const domNode = element[0];
+        const headerOffset = 150;
+        const elementPosition = domNode.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+
+        window.scrollTo({
+            top: offsetPosition,
+            behavior: "smooth"
+        });
+
+        if (element.is('input, select, textarea')) {
+            setTimeout(() => {
+                element.focus({ preventScroll: true });
+            }, 300);
+        }
+    }
     // ==================================================
     // 1. SESSION MANAGEMENT
+
     // ==================================================
     function checkSessionExpiry() {
         const now = new Date().getTime();
@@ -1166,6 +1220,136 @@ $(document).ready(function () {
             chatSessionId = null;
             chatUserName = null;
         }
+        // ==================================================
+        // FIX: Inject Close Button on Mobile if Missing
+        // ==================================================
+        function ensureChatCloseButton() {
+            if ($(window).width() <= 768) {
+                var $chatBox = $('#live-chat-box');
+                var $closeBtn = $('#chat-close-btn');
+
+                // If chat box exists but button is missing
+                if ($chatBox.length > 0 && $closeBtn.length === 0) {
+                    // Append the button manually
+                    $chatBox.append('<div id="chat-close-btn"><i class="fas fa-times"></i></div>');
+
+                    // Bind the click event to the new button
+                    $(document).on('click', '#chat-close-btn', function () {
+                        $('#live-chat-box').fadeOut();
+                        var mainBtn = $('#support-widget-btn');
+                        mainBtn.removeClass('active');
+                        mainBtn.find('i').removeClass('fa-times').addClass('fa-headset');
+                    });
+                }
+            }
+// A. When a Checkbox is toggled
+//             $(document).on('change', '.variant-select-chk', function () {
+//                 // Visual styling for the row
+//                 const $row = $(this).closest('.variant-row-card');
+//                 if ($(this).is(':checked')) {
+//                     $row.css('border-color', '#2ebf91').css('background-color', '#f0fdf4');
+//                 } else {
+//                     $row.css('border-color', '#e0e0e0').css('background-color', '#fff');
+//                 }
+//                 updateTotals();
+//             });
+            // Row Click (Toggles Checkbox for better UX)
+            // $(document).on('input change', '.row-qty-input', function () {
+            //     const $row = $(this).closest('.variant-row-card');
+            //     const $chk = $row.find('.variant-select-chk');
+            //
+            //     // Auto-check the box if quantity is touched
+            //     if (!$chk.is(':checked')) {
+            //         $chk.prop('checked', true).trigger('change');
+            //     } else {
+            //         updateTotals();
+            //     }
+            // });
+            // Quantity Buttons (+/-)
+            // $(document).off('click', '.row-qty-btn').on('click', '.row-qty-btn', function (e) {
+            //     e.preventDefault(); e.stopPropagation();
+            //
+            //     const $btn = $(this);
+            //     const $row = $btn.closest('.variant-row-card');
+            //     const $input = $row.find('.row-qty-input');
+            //     const $checkbox = $row.find('.variant-select-chk');
+            //
+            //     let currentVal = parseInt($input.val()) || 0;
+            //     const maxStock = parseInt($checkbox.data('stock')) || 999;
+            //
+            //     if ($btn.hasClass('plus')) {
+            //         if (currentVal < maxStock) $input.val(currentVal + 1);
+            //         else Swal.fire({ toast: true, icon: 'warning', title: `Max Stock: ${maxStock}`, position: 'top-end', timer: 1500, showConfirmButton: false });
+            //     } else {
+            //         if (currentVal > 1) $input.val(currentVal - 1);
+            //     }
+            //
+            //     // Auto-select checkbox if quantity changed
+            //     if (!$checkbox.is(':checked')) {
+            //         $checkbox.prop('checked', true).trigger('change');
+            //     } else {
+            //         updateTotals();
+            //     }
+            // });
+        }
+
+        // Run on load and on resize
+        ensureChatCloseButton();
+        $(window).resize(ensureChatCloseButton);
+        // HELPER: Force Scroll to Element (Fixes Sticky Header issues)
+        function forceScrollTo(element) {
+            if (!element || element.length === 0) return;
+
+            // 1. Get the DOM object
+            const domNode = element[0];
+
+            // 2. Calculate position: Absolute Top - Header Offset (150px)
+            const headerOffset = 150;
+            const elementPosition = domNode.getBoundingClientRect().top;
+            const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+
+            // 3. Scroll Manually
+            window.scrollTo({
+                top: offsetPosition,
+                behavior: "smooth"
+            });
+
+            // 4. Focus if it's an input (opens keyboard on mobile)
+            if (element.is('input, select, textarea')) {
+                // slightly delay focus to allow scroll to start
+                setTimeout(() => {
+                    element.focus({ preventScroll: true });
+                }, 300);
+            }
+        }
+        // ==================================================
+        // HELPER: Force Scroll to Element (Fixes Sticky Header issues)
+        // Place this at the top of $(document).ready
+        // ==================================================
+        // function forceScrollTo(element) {
+        //     if (!element || element.length === 0) return;
+        //
+        //     // 1. Get the DOM object
+        //     const domNode = element[0];
+        //
+        //     // 2. Calculate position: Absolute Top - Header Offset (150px)
+        //     const headerOffset = 150;
+        //     const elementPosition = domNode.getBoundingClientRect().top;
+        //     const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+        //
+        //     // 3. Scroll Manually
+        //     window.scrollTo({
+        //         top: offsetPosition,
+        //         behavior: "smooth"
+        //     });
+        //
+        //     // 4. Focus if it's an input (opens keyboard on mobile)
+        //     if (element.is('input, select, textarea')) {
+        //         setTimeout(() => {
+        //             element.focus({ preventScroll: true });
+        //         }, 300);
+        //     }
+        // }
     }
 
     checkSessionExpiry();
@@ -1486,18 +1670,164 @@ function showOrderSuccessAlert(orderId, customerName, customerPhone) {
         customClass: {
             popup: 'animated fadeInDown' // Optional animation
         }
+        // ... inside the Swal.fire success alert ...
     }).then((result) => {
         if (result.isConfirmed) {
-            // 1. Click the "Track My Order" button in your header to open the modal
+            // 1. Open Track Modal
             $('#open-status-modal').click();
 
-            // 2. Pre-fill the input inside that modal (if input has id="track-order-id")
+            // 2. Pre-fill Tracking ID
             setTimeout(() => {
-                $('#track-order-id').val(orderId);
+                $('#track-order-id').val(res.orderId || res.OrderId);
             }, 300);
+
+            // 3. RESET FORM & BUTTON (Fixes the stuck "Processing" button)
+            $btn.prop('disabled', false);     // Re-enable button
+            updateSubmitButtonText();         // Restore "Confirm Order" text
+            $('#order-form')[0].reset();      // Clear name, phone, etc.
+
         } else {
-            // Reload if they click Close
+            // If they clicked "Close", we can safely reload the page
             window.location.reload();
         }
     });
-}
+}  
+    
+    // image modal
+
+    // Open the Modal
+    // Make functions global by using "window."
+window.openImageModal = function(src) {
+    var modal = document.getElementById("productImageModal");
+    var modalImg = document.getElementById("modalImgDisplay");
+
+    if(modal && modalImg) {
+        // CHANGE THIS LINE: Use 'flex' instead of 'block'
+        modal.style.display = "flex";
+
+        modalImg.src = src;
+    }
+};
+
+window.closeImageModal = function() {
+        var modal = document.getElementById("productImageModal");
+        if(modal) {
+            modal.style.display = "none";
+        }
+    };
+
+// Close modal if user clicks background (keep this outside functions)
+    window.onclick = function(event) {
+        var modal = document.getElementById("productImageModal");
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+// ==================================================
+        // 8. QUANTITY CONTROLS & REAL-TIME STOCK UPDATE
+        // ==================================================
+
+        // 1. Helper Function: Update the "Stock: 28" text
+        function updateStockText($row) {
+            var $stockSpan = $row.find('.dynamic-stock');
+            var $qtyInput = $row.find('.row-qty-input');
+
+            // Get the values
+            var maxStock = parseInt($stockSpan.data('max')) || 0;
+            var currentQty = parseInt($qtyInput.val()) || 1;
+
+            // Calculate remaining
+            var remaining = maxStock - currentQty;
+
+            // Update the text display
+            if ($stockSpan.length > 0 && maxStock > 0) {
+                if (remaining < 0) remaining = 0; // Safety check
+
+                $stockSpan.text('(Stock: ' + remaining + ')');
+
+                // Visual feedback: Turn red if stock hits 0
+                if (remaining === 0) {
+                    $stockSpan.css('color', '#dc3545');
+                } else {
+                    $stockSpan.css('color', '#777');
+                }
+            }
+        }
+
+        // 2. Checkbox Toggle
+        $(document).on('change', '.variant-select-chk', function () {
+            const $row = $(this).closest('.variant-row-card');
+            if ($(this).is(':checked')) {
+                $row.css('border-color', '#2ebf91').css('background-color', '#f0fdf4');
+            } else {
+                $row.css('border-color', '#e0e0e0').css('background-color', '#fff');
+            }
+            updateTotals();
+        });
+
+        // 3. Row Click (Selects the product when clicking the box)
+        $(document).on('click', '.variant-row-card', function (e) {
+            if ($(e.target).closest('.variant-select-chk, .row-qty-btn, input, img').length) return;
+
+            const $chk = $(this).find('.variant-select-chk');
+            $chk.prop('checked', !$chk.is(':checked')).trigger('change');
+        });
+
+        // 4. Quantity Input Change (Manual Typing)
+        $(document).on('input change', '.row-qty-input', function () {
+            const $row = $(this).closest('.variant-row-card');
+            const $chk = $row.find('.variant-select-chk');
+
+            let val = parseInt($(this).val());
+            const maxStock = parseInt($chk.data('stock')) || 999;
+
+            if(isNaN(val) || val < 1) $(this).val(1);
+            if(val > maxStock) $(this).val(maxStock);
+
+            // Update the stock text immediately
+            updateStockText($row);
+
+            if (!$chk.is(':checked')) {
+                $chk.prop('checked', true).trigger('change');
+            } else {
+                updateTotals();
+            }
+        });
+
+        // 5. Plus / Minus Buttons (Merged Logic)
+        $(document).off('click', '.row-qty-btn').on('click', '.row-qty-btn', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const $btn = $(this);
+            const $row = $btn.closest('.variant-row-card');
+            const $input = $row.find('.row-qty-input');
+            const $checkbox = $row.find('.variant-select-chk');
+
+            let currentVal = parseInt($input.val()) || 0;
+            const maxStock = parseInt($checkbox.data('stock')) || 999;
+
+            if ($btn.hasClass('plus')) {
+                if (currentVal < maxStock) {
+                    $input.val(currentVal + 1);
+                } else {
+                    if(typeof Swal !== 'undefined') {
+                        Swal.fire({ toast: true, icon: 'warning', title: `Max Stock: ${maxStock}`, position: 'top-end', timer: 1500, showConfirmButton: false });
+                    }
+                }
+            } else {
+                if (currentVal > 1) {
+                    $input.val(currentVal - 1);
+                }
+            }
+
+            // ✅ CALL THE UPDATE FUNCTION HERE
+            updateStockText($row);
+
+            // Auto-select checkbox if quantity changed
+            if (!$checkbox.is(':checked')) {
+                $checkbox.prop('checked', true).trigger('change');
+            } else {
+                updateTotals();
+            }
+        });
+    };

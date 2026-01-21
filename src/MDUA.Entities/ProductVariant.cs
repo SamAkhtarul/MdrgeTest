@@ -28,6 +28,7 @@ namespace MDUA.Entities
     {
         public int ProductId { get; set; }
         public decimal BasePrice { get; set; }
+        public List<AttributeName> Attributes { get; set; } = new List<AttributeName>();
         public List<ProductVariant> Variants { get; set; } = new List<ProductVariant>();
         public List<AttributeName> AvailableAttributes { get; set; } = new List<AttributeName>();
         public int ReorderLevel { get; set; }

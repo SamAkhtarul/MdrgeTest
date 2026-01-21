@@ -13,7 +13,7 @@ using MDUA.DataAccess.Interface;
 
 namespace MDUA.DataAccess
 {
-	public partial class DeliveryDataAccess : BaseDataAccess, IDeliveryDataAccess
+	public partial class DeliveryDataAccess : BaseDataAccess , IDeliveryDataAccess
 	{
 		#region Constants
 		private const string INSERTDELIVERY = "InsertDelivery";
@@ -23,6 +23,7 @@ namespace MDUA.DataAccess
 		private const string GETALLDELIVERY = "GetAllDelivery";
 		private const string GETPAGEDDELIVERY = "GetPagedDelivery";
 		private const string GETDELIVERYBYSALESORDERID = "GetDeliveryBySalesOrderId";
+		private const string GETDELIVERYBYCARRIERID = "GetDeliveryByCarrierId";
 		private const string GETDELIVERYMAXIMUMID = "GetDeliveryMaximumId";
 		private const string GETDELIVERYROWCOUNT = "GetDeliveryRowCount";	
 		private const string GETDELIVERYBYQUERY = "GetDeliveryByQuery";
@@ -44,13 +45,21 @@ namespace MDUA.DataAccess
 		private void AddCommonParams(SqlCommand cmd, DeliveryBase deliveryObject)
 		{	
 			AddParameter(cmd, pInt32(DeliveryBase.Property_SalesOrderId, deliveryObject.SalesOrderId));
-			AddParameter(cmd, pDateTime(DeliveryBase.Property_DeliveryDate, deliveryObject.DeliveryDate));
 			AddParameter(cmd, pNVarChar(DeliveryBase.Property_TrackingNumber, 100, deliveryObject.TrackingNumber));
+			AddParameter(cmd, pDateTime(DeliveryBase.Property_ShipDate, deliveryObject.ShipDate));
+			AddParameter(cmd, pDateTime(DeliveryBase.Property_EstimatedArrival, deliveryObject.EstimatedArrival));
+			AddParameter(cmd, pDateTime(DeliveryBase.Property_ActualDeliveryDate, deliveryObject.ActualDeliveryDate));
 			AddParameter(cmd, pNVarChar(DeliveryBase.Property_Status, 50, deliveryObject.Status));
+			AddParameter(cmd, pDecimal(DeliveryBase.Property_ShippingCost, 9, deliveryObject.ShippingCost));
 			AddParameter(cmd, pNVarChar(DeliveryBase.Property_CreatedBy, 100, deliveryObject.CreatedBy));
 			AddParameter(cmd, pDateTime(DeliveryBase.Property_CreatedAt, deliveryObject.CreatedAt));
 			AddParameter(cmd, pNVarChar(DeliveryBase.Property_UpdatedBy, 100, deliveryObject.UpdatedBy));
 			AddParameter(cmd, pDateTime(DeliveryBase.Property_UpdatedAt, deliveryObject.UpdatedAt));
+			AddParameter(cmd, pDecimal(DeliveryBase.Property_CarrierCharge, 9, deliveryObject.CarrierCharge));
+			AddParameter(cmd, pInt32(DeliveryBase.Property_PackageWeightGrams, deliveryObject.PackageWeightGrams));
+			AddParameter(cmd, pNVarChar(DeliveryBase.Property_CarrierResponse, deliveryObject.CarrierResponse));
+			AddParameter(cmd, pNVarChar(DeliveryBase.Property_ConsignmentId, 100, deliveryObject.ConsignmentId));
+			AddParameter(cmd, pInt32(DeliveryBase.Property_CarrierId, deliveryObject.CarrierId));
 		}
 		#endregion
 		
@@ -179,6 +188,20 @@ namespace MDUA.DataAccess
 			}
 		}
 		
+		/// <summary>
+        /// Retrieves all Delivery objects by CarrierId
+        /// </summary>
+        /// <returns>A list of Delivery objects</returns>
+		public DeliveryList GetByCarrierId(Nullable<Int32> _CarrierId)
+		{
+			using( SqlCommand cmd = GetSPCommand(GETDELIVERYBYCARRIERID))
+			{
+				
+				AddParameter( cmd, pInt32(DeliveryBase.Property_CarrierId, _CarrierId));
+				return GetList(cmd, ALL_AVAILABLE_RECORDS);
+			}
+		}
+		
 		
 		/// <summary>
         /// Retrieves all Delivery objects by PageRequest
@@ -269,14 +292,22 @@ namespace MDUA.DataAccess
 			
 				deliveryObject.Id = reader.GetInt32( start + 0 );			
 				deliveryObject.SalesOrderId = reader.GetInt32( start + 1 );			
-				deliveryObject.DeliveryDate = reader.GetDateTime( start + 2 );			
-				if(!reader.IsDBNull(3)) deliveryObject.TrackingNumber = reader.GetString( start + 3 );			
-				deliveryObject.Status = reader.GetString( start + 4 );			
-				deliveryObject.CreatedBy = reader.GetString( start + 5 );			
-				deliveryObject.CreatedAt = reader.GetDateTime( start + 6 );			
-				if(!reader.IsDBNull(7)) deliveryObject.UpdatedBy = reader.GetString( start + 7 );			
-				if(!reader.IsDBNull(8)) deliveryObject.UpdatedAt = reader.GetDateTime( start + 8 );			
-			FillBaseObject(deliveryObject, reader, (start + 9));
+				if(!reader.IsDBNull(2)) deliveryObject.TrackingNumber = reader.GetString( start + 2 );			
+				if(!reader.IsDBNull(3)) deliveryObject.ShipDate = reader.GetDateTime( start + 3 );			
+				if(!reader.IsDBNull(4)) deliveryObject.EstimatedArrival = reader.GetDateTime( start + 4 );			
+				if(!reader.IsDBNull(5)) deliveryObject.ActualDeliveryDate = reader.GetDateTime( start + 5 );			
+				deliveryObject.Status = reader.GetString( start + 6 );			
+				if(!reader.IsDBNull(7)) deliveryObject.ShippingCost = reader.GetDecimal( start + 7 );			
+				if(!reader.IsDBNull(8)) deliveryObject.CreatedBy = reader.GetString( start + 8 );			
+				deliveryObject.CreatedAt = reader.GetDateTime( start + 9 );			
+				if(!reader.IsDBNull(10)) deliveryObject.UpdatedBy = reader.GetString( start + 10 );			
+				if(!reader.IsDBNull(11)) deliveryObject.UpdatedAt = reader.GetDateTime( start + 11 );			
+				if(!reader.IsDBNull(12)) deliveryObject.CarrierCharge = reader.GetDecimal( start + 12 );			
+				if(!reader.IsDBNull(13)) deliveryObject.PackageWeightGrams = reader.GetInt32( start + 13 );			
+				if(!reader.IsDBNull(14)) deliveryObject.CarrierResponse = reader.GetString( start + 14 );			
+				if(!reader.IsDBNull(15)) deliveryObject.ConsignmentId = reader.GetString( start + 15 );			
+				if(!reader.IsDBNull(16)) deliveryObject.CarrierId = reader.GetInt32( start + 16 );			
+			FillBaseObject(deliveryObject, reader, (start + 17));
 
 			
 			deliveryObject.RowState = BaseBusinessEntity.RowStateEnum.NormalRow;	

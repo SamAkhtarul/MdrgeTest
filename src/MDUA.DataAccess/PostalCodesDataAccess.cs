@@ -23,7 +23,7 @@ namespace MDUA.DataAccess
         public List<string> GetDivisions()
         {
             var list = new List<string>();
-            string sql = "SELECT DISTINCT DivisionEn FROM PostalCodes ORDER BY DivisionEn";
+            string sql = "SELECT DISTINCT DivisionBn FROM PostalCodes ORDER BY DivisionBn";
 
             using (var cmd = GetSQLCommand(sql))
             {
@@ -36,8 +36,8 @@ namespace MDUA.DataAccess
                     while (reader.Read())
                     {
                         // Safe check for DBNull if necessary, though distinct usually implies values
-                        if (reader["DivisionEn"] != DBNull.Value)
-                            list.Add(reader["DivisionEn"].ToString());
+                        if (reader["DivisionBn"] != DBNull.Value)
+                            list.Add(reader["DivisionBn"].ToString());
                     }
                 }
             }
@@ -54,12 +54,12 @@ namespace MDUA.DataAccess
             if (string.IsNullOrWhiteSpace(division))
             {
                 // NO Division provided -> Return ALL unique districts
-                sql = "SELECT DISTINCT DistrictEn FROM PostalCodes ORDER BY DistrictEn";
+                sql = "SELECT DISTINCT DistrictBn FROM PostalCodes ORDER BY DistrictBn";
             }
             else
             {
                 // Division provided -> Filter by that division
-                sql = "SELECT DISTINCT DistrictEn FROM PostalCodes WHERE DivisionEn = @Div ORDER BY DistrictEn";
+                sql = "SELECT DISTINCT DistrictBn FROM PostalCodes WHERE DivisionBn = @Div ORDER BY DistrictBn";
             }
 
             using (var cmd = GetSQLCommand(sql))
@@ -77,9 +77,9 @@ namespace MDUA.DataAccess
                 {
                     while (reader.Read())
                     {
-                        if (reader["DistrictEn"] != DBNull.Value)
+                        if (reader["DistrictBn"] != DBNull.Value)
                         {
-                            list.Add(reader["DistrictEn"].ToString());
+                            list.Add(reader["DistrictBn"].ToString());
                         }
                     }
                 }
@@ -90,7 +90,7 @@ namespace MDUA.DataAccess
         public List<string> GetThanas(string district)
         {
             var list = new List<string>();
-            string sql = "SELECT DISTINCT ThanaEn FROM PostalCodes WHERE DistrictEn = @Dist ORDER BY ThanaEn";
+            string sql = "SELECT DISTINCT ThanaBn FROM PostalCodes WHERE DistrictBn = @Dist ORDER BY ThanaBn";
 
             using (var cmd = GetSQLCommand(sql))
             {
@@ -104,8 +104,8 @@ namespace MDUA.DataAccess
                 {
                     while (reader.Read())
                     {
-                        if (reader["ThanaEn"] != DBNull.Value)
-                            list.Add(reader["ThanaEn"].ToString());
+                        if (reader["ThanaBn"] != DBNull.Value)
+                            list.Add(reader["ThanaBn"].ToString());
                     }
                 }
             }
@@ -116,7 +116,7 @@ namespace MDUA.DataAccess
         public List<dynamic> GetSubOffices(string thana)
         {
             var list = new List<dynamic>();
-            string sql = "SELECT SubOfficeEn, PostCode FROM PostalCodes WHERE ThanaEn = @Thana ORDER BY SubOfficeEn";
+            string sql = "SELECT SubOfficeBn, PostCode FROM PostalCodes WHERE ThanaBn = @Thana ORDER BY SubOfficeBn";
 
             using (var cmd = GetSQLCommand(sql))
             {
@@ -132,7 +132,7 @@ namespace MDUA.DataAccess
                     {
                         list.Add(new
                         {
-                            Name = reader["SubOfficeEn"].ToString(),
+                            Name = reader["SubOfficeBn"].ToString(),
                             Code = reader["PostCode"].ToString()
                         });
                     }

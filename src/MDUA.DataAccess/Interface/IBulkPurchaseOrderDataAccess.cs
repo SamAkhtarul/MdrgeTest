@@ -17,5 +17,7 @@ namespace MDUA.DataAccess.Interface
         BulkPurchaseOrder Get(int id);
         long Update(BulkPurchaseOrderBase obj);
         long Delete(int id);
+        List<BulkOrderItemViewModel> GetBulkOrderItems(int bulkOrderId);
+        List<BulkPurchaseOrder> GetByCompanyId(int companyId);
     }
 }

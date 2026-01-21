@@ -1,0 +1,21 @@
+# This is a generated file. Not intended for manual editing.
+services:
+  mdua.web.ui:
+    build:
+      context: "/Users/SAM/RiderProjects/MDUA/bd-dev-mayer-dua/src"
+      dockerfile: "MDUA.Web.UI/Dockerfile"
+      target: "base"
+    command: []
+    entrypoint:
+    - "dotnet"
+    - "/app/bin/Debug/net9.0/MDUA.Web.UI.dll"
+    environment:
+      ASPNETCORE_STATICWEBASSETS: "/app/bin/Debug/net9.0/MDUA.Web.UI.staticwebassets.runtime.CT.json"
+      DOTNET_USE_POLLING_FILE_WATCHER: "true"
+    image: "mduawebui:dev"
+    ports: []
+    volumes:
+    - "/Users/SAM/RiderProjects/MDUA/bd-dev-mayer-dua/src/MDUA.Web.UI:/app:rw"
+    - "/Users/SAM/RiderProjects/MDUA/bd-dev-mayer-dua/src:/src:rw"
+    - "/Users/SAM/.nuget/packages:/home/app/.nuget/packages"
+    working_dir: "/app"

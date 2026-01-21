@@ -22,5 +22,7 @@ namespace MDUA.Entities
         public int Quantity { get; set; }
         public string Status { get; set; }
         public DateTime RequestDate { get; set; }
+        public int VendorId { get; set; }
+        public decimal SuggestedPrice { get; set; }
     }
 }

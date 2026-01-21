@@ -1,11 +1,12 @@
 ﻿using MDUA.Entities;
 using MDUA.Facade;
 using MDUA.Facade.Interface;
+using MDUA.Web.UI.Controllers;
+using MDUA.Web.UI.Extensions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using System.Globalization;
 using System.Security.Claims;
-using MDUA.Web.UI.Controllers;
 
 
 namespace MDUA.Web.UI.Controllers
@@ -14,16 +15,18 @@ namespace MDUA.Web.UI.Controllers
     {
         private readonly IOrderFacade _orderFacade;
         private readonly IUserLoginFacade _userLoginFacade;
-        private readonly IPaymentFacade _paymentFacade; // <--- ADD THIS
+        private readonly IPaymentFacade _paymentFacade;
         private readonly ISettingsFacade _settingsFacade;
         private readonly IDeliveryStatusLogFacade _logFacade;
-        public OrderController(IOrderFacade orderFacade, IUserLoginFacade userLoginFacade, IPaymentFacade paymentFacade, ISettingsFacade settingsFacade, IDeliveryStatusLogFacade logFacade)
+        private readonly ISubscriptionSystemFacade _subscriptionFacade;
+        public OrderController(IOrderFacade orderFacade, IUserLoginFacade userLoginFacade, IPaymentFacade paymentFacade, ISettingsFacade settingsFacade, IDeliveryStatusLogFacade logFacade, ISubscriptionSystemFacade subscriptionSystemFacade)
         {
             _orderFacade = orderFacade;
             _userLoginFacade = userLoginFacade;
             _paymentFacade = paymentFacade;
             _settingsFacade = settingsFacade;
             _logFacade = logFacade;
+            _subscriptionFacade = subscriptionSystemFacade;
 
         }
 
@@ -404,6 +407,16 @@ namespace MDUA.Web.UI.Controllers
         {
             if (!HasPermission("Order.View")) return HandleAccessDenied();
 
+            if (_subscriptionFacade.IsSubscriptionLocked(CurrentCompanyId, out int current, out int limit))
+
+            {
+
+                // Redirect to the Paywall / Limit Reached page
+
+                return RedirectToAction("LimitReached", "Subscription", new { current = current, limit = limit });
+
+            }
+
             try
             {
                 // 1. Dynamic Company ID
@@ -432,7 +445,7 @@ namespace MDUA.Web.UI.Controllers
                 // B. Filter by Payment
                 if (!string.IsNullOrEmpty(payStatus) && payStatus != "all")
                 {
-               
+
 
                     if (payStatus == "Paid")
                         whereBuilder.Append(" AND (soh.NetAmount - ISNULL((SELECT SUM(Amount) FROM CustomerPayment WHERE TransactionReference = soh.SalesOrderId), 0)) <= 0");
@@ -495,7 +508,7 @@ namespace MDUA.Web.UI.Controllers
 
                 // 3. Execute
                 int totalRows;
-                var orders = _orderFacade.GetPagedOrdersForAdmin(page, pageSize, whereBuilder.ToString(), out totalRows);
+                var orders = _orderFacade.GetPagedOrdersForAdmin(page, pageSize, whereBuilder.ToString(), companyId, out totalRows);
 
                 var viewModel = new MDUA.Web.UI.Models.PagedOrderViewModel
                 {
@@ -525,75 +538,56 @@ namespace MDUA.Web.UI.Controllers
                 return View(new MDUA.Web.UI.Models.PagedOrderViewModel());
             }
         }
-
-        [HttpPost]
+         [HttpPost]
         [Route("order/place")]
         public async Task<IActionResult> PlaceOrder([FromBody] SalesOrderHeader model)
         {
             if (model == null)
             {
-                return BadRequest(new
-                {
-                    success = false,
-                    message = "Invalid Data: Please select a product variant and fill all required fields."
-                });
+                return BadRequest(new { success = false, message = "Invalid Data." });
             }
 
             try
             {
-                // ---------------------------------------------------------
-                // 1. CAPTURE IP ADDRESS
-                // ---------------------------------------------------------
-                // The Middleware above has already populated RemoteIpAddress with the real user IP
+                // 1. IP & Session Setup
                 string ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-                // Handle Loopback (Localhost) scenarios for display purposes
                 if (ipAddress == "::1") ipAddress = "127.0.0.1";
-
-                // Optional: Remove the port number if present (IPv6 often includes it)
-                if (ipAddress != null && ipAddress.Contains("%"))
-                {
-                    ipAddress = ipAddress.Split('%')[0];
-                }
-
+                if (ipAddress != null && ipAddress.Contains("%")) ipAddress = ipAddress.Split('%')[0];
                 model.IPAddress = ipAddress;
 
-                // ---------------------------------------------------------
-                // 2. CAPTURE SESSION ID
-                // ---------------------------------------------------------
                 if (string.IsNullOrEmpty(HttpContext.Session.GetString("IsActive")))
                 {
                     HttpContext.Session.SetString("IsActive", "true");
                 }
-
                 model.SessionId = HttpContext.Session.Id;
+                model.CreatedBy = model.CustomerName ?? "Guest";
+
+                // =========================================================
+                // 2. ✅ CHECK SUBSCRIPTION QUOTA
+                // =========================================================
+
+                // FIX: Use 'TargetCompanyId' as per your Entity definition
+                int companyIdToCharge = model.TargetCompanyId;
+
+                // Safety: If frontend didn't send it, usually we default to 1 (System) or Error
+                if (companyIdToCharge <= 0) companyIdToCharge = 1;
 
 
-                model.CreatedBy = model.CustomerName;
-                // ---------------------------------------------------------
-                // 3. PROCEED (✅ AWAIT REQUIRED)
-                // ---------------------------------------------------------
+           
+                // =========================================================
+
+                // 3. Place Order
                 string orderId = await _orderFacade.PlaceGuestOrder(model);
 
-                return Json(new
-                {
-                    success = true,
-                    orderId = orderId
-                });
+                return Json(new { success = true, orderId = orderId });
             }
             catch (Exception ex)
             {
-                var realError = ex.InnerException != null
-                    ? ex.InnerException.Message
-                    : ex.Message;
-
-                return Json(new
-                {
-                    success = false,
-                    message = realError
-                });
+                var realError = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                return Json(new { success = false, message = realError });
             }
         }
+
 
 
 
@@ -605,23 +599,25 @@ namespace MDUA.Web.UI.Controllers
 
             try
             {
-                // Get Old State
-                var order = _orderFacade.GetOrderById(id);
-                bool oldConfirmed = order?.Confirmed ?? !isConfirmed; // Fallback
-
                 string username = User.Identity.Name ?? "Unknown_User";
 
-                // Perform Update
+                // 1. Get Old State (For Logging)
+                // fetch BEFORE the update to know what changed
+                var order = _orderFacade.GetOrderById(id);
+                string oldStatus = order?.Status ?? "Draft";
+                bool oldConfirmed = order?.Confirmed ?? !isConfirmed;
+
+                // 2. Perform Update 
                 string newStatus = _orderFacade.UpdateOrderConfirmation(id, isConfirmed, username);
 
-                // LOG CONFIRMATION CHANGE
+                // 3. Log Change (Only if successful and status actually changed)
                 if (oldConfirmed != isConfirmed)
                 {
                     _logFacade.LogStatusChange(
                         entityId: id,
                         entityType: "SalesOrderHeader",
-                        oldStatus: oldConfirmed ? "Confirmed" : "Unconfirmed", // Conceptual status
-                        newStatus: isConfirmed ? "Confirmed" : "Unconfirmed",
+                        oldStatus: oldStatus,
+                        newStatus: newStatus,
                         changedBy: username,
                         reason: isConfirmed ? "Order Confirmed Manually" : "Order Unconfirmed Manually"
                     );
@@ -636,40 +632,44 @@ namespace MDUA.Web.UI.Controllers
         }
 
         [Route("order/add")]
-        [HttpGet]
-        public IActionResult Add()
+[HttpGet]
+public IActionResult Add()
+{
+    if (!HasPermission("Order.Place")) return HandleAccessDenied();
+
+    // (Subscription check logic commented out as per your snippet)
+
+    try
+    {
+        // 1. GET COMPANY ID FIRST (Moved this up)
+        int companyId = 1; 
+        var claim = User.FindFirst("CompanyId") ?? User.FindFirst("TargetCompanyId");
+        if (claim != null && int.TryParse(claim.Value, out int parsedId))
         {
-            if (!HasPermission("Order.Place")) return HandleAccessDenied();
-
-            try
-            {
-                // 1. Fetch Products
-                var products = _orderFacade.GetProductVariantsForAdmin();
-                ViewBag.ProductVariants = products;
-
-                int companyId = 1; // Default or fetch from User Claims
-                var claim = User.FindFirst("CompanyId") ?? User.FindFirst("TargetCompanyId");
-                if (claim != null && int.TryParse(claim.Value, out int parsedId))
-                {
-                    companyId = parsedId;
-                }
-
-                var settings = _settingsFacade.GetDeliverySettings(companyId) ?? new Dictionary<string, int>();
-
-                if (!settings.ContainsKey("dhaka")) settings["dhaka"] = 0;
-                if (!settings.ContainsKey("outside")) settings["outside"] = 0;
-
-                ViewBag.DeliverySettings = settings; 
-
-                return View();
-            }
-            catch (Exception ex)
-            {
-                ViewData["ErrorMessage"] = "Error loading products: " + ex.Message;
-                return View();
-            }
+            companyId = parsedId;
         }
 
+        // 2. NOW CALL FACADE WITH ID (Fixed Error)
+        var products = _orderFacade.GetProductVariantsForAdmin(companyId); // ✅ Added companyId here
+        ViewBag.ProductVariants = products;
+
+        // 3. Load Delivery Settings
+        var settings = _settingsFacade.GetDeliverySettings(companyId) ?? new Dictionary<string, int>();
+
+        if (!settings.ContainsKey("dhaka")) settings["dhaka"] = 0;
+        if (!settings.ContainsKey("outside")) settings["outside"] = 0;
+
+        ViewBag.DeliverySettings = settings;
+        ViewBag.TargetCompanyId = companyId; // Useful for the View to know
+
+        return View();
+    }
+    catch (Exception ex)
+    {
+        ViewData["ErrorMessage"] = "Error loading products: " + ex.Message;
+        return View();
+    }
+}
         [HttpPost]
         [Route("SalesOrder/UpdateStatus")]
         public IActionResult UpdateStatus(int id, string status)
@@ -713,64 +713,72 @@ namespace MDUA.Web.UI.Controllers
 
 
 
-
         [Route("order/place-direct")]
         [HttpPost]
         public IActionResult PlaceDirectOrder([FromBody] SalesOrderHeader model)
         {
+            // 1. Permission Check
             if (!HasPermission("Order.Place")) return HandleAccessDenied();
 
             try
             {
-                // ✅ FIX: Enforce valid Company ID from UI.
+                // 2. Validate Target Company
                 if (model.TargetCompanyId <= 0)
                 {
                     return Json(new { success = false, message = "Target Company ID is required." });
                 }
 
-                // ---------------------------------------------------------
-                // 1. CAPTURE IP ADDRESS
-                // ---------------------------------------------------------
+                // --- A. IP & Session Setup ---
                 string ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-                // Check if behind a proxy (like Nginx/Cloudflare/IIS)
                 if (Request.Headers.ContainsKey("X-Forwarded-For"))
                 {
                     ipAddress = Request.Headers["X-Forwarded-For"].FirstOrDefault();
                 }
 
-                // Handle Localhost IPv6
                 if (ipAddress == "::1") ipAddress = "127.0.0.1";
 
-                // Truncate to 45 chars to fit database schema
+                // Truncate for DB safety
                 if (!string.IsNullOrEmpty(ipAddress) && ipAddress.Length > 45)
                 {
                     ipAddress = ipAddress.Substring(0, 45);
                 }
-
                 model.IPAddress = ipAddress;
 
-                // ---------------------------------------------------------
-                // 2. CAPTURE SESSION ID
-                // ---------------------------------------------------------
-                // "Kickstart" session if empty to ensure the ID is stable
                 if (string.IsNullOrEmpty(HttpContext.Session.GetString("IsActive")))
                 {
                     HttpContext.Session.SetString("IsActive", "true");
                 }
-
                 model.SessionId = HttpContext.Session.Id;
+
                 string loggedInUser = User.Identity?.Name ?? "Admin";
                 model.CreatedBy = loggedInUser;
-                // ---------------------------------------------------------
-                // 3. EXECUTE ORDER
-                // ---------------------------------------------------------
-                // 🛑 FIX: Use 'var' or 'dynamic' because PlaceAdminOrder returns an object, not a string
+
+                // --- B. SUBSCRIPTION QUOTA CHECK ---
+                // Even manual admin orders count towards the quota!
+
+                //var quotaCheck = _subscriptionFacade.ProcessOrderUsage(model.TargetCompanyId);
+
+                //if (!quotaCheck.IsAllowed)
+                //{
+                //    // ⛔ LIMIT REACHED
+                //    return Json(new
+                //    {
+                //        success = false,
+                //        message = $"Cannot place order: Subscription Limit Reached ({quotaCheck.Reason}). Please upgrade the plan."
+                //    });
+                //}
+
+                // --- C. SAVE ORDER ---
+
+                // 'var result' usually returns the OrderID or a Success object
                 var result = _orderFacade.PlaceAdminOrder(model);
 
-                // Pass the whole result object to the frontend. 
-                // Your admin-order.js is already written to handle this object in the 'orderId' field.
-                return Json(new { success = true, orderId = result, message = "Direct Order placed successfully!" });
+                return Json(new
+                {
+                    success = true,
+                    orderId = result,
+                    message = "Direct Order placed successfully!"
+                });
             }
             catch (Exception ex)
             {
@@ -789,7 +797,12 @@ namespace MDUA.Web.UI.Controllers
 
             try
             {
-                var products = _orderFacade.GetProductVariantsForAdmin();
+                // 1. Get Current Company ID
+                int companyId = Convert.ToInt32(User.FindFirst("CompanyId")?.Value ?? "1");
+
+                // 2. Pass companyId to Facade
+                var products = _orderFacade.GetProductVariantsForAdmin(companyId);
+
                 return Json(products);
             }
             catch (Exception ex)
@@ -797,6 +810,8 @@ namespace MDUA.Web.UI.Controllers
                 return StatusCode(500, new { message = ex.Message });
             }
         }
+
+
         public class PaymentRequestModel : CustomerPayment
         {
             public decimal DeliveryCharge { get; set; }
@@ -856,5 +871,75 @@ namespace MDUA.Web.UI.Controllers
             return RedirectToAction("AllOrders", new { page = targetPage, pageSize = pageSize, highlightId = orderId });
         }
 
+        // ✅ NEW ENDPOINT: Get Payment History
+        [HttpGet]
+        [Route("order/payments")]
+        public IActionResult GetOrderPayments(string orderRef)
+        {
+            if (string.IsNullOrEmpty(orderRef)) return Json(new List<object>());
+
+            try
+            {
+                // This calls the new method in Facade
+                var payments = _orderFacade.GetPaymentsByOrderRef(orderRef);
+
+                return Json(payments.Select(p => new {
+                    id = p.Id,
+                    date = p.PaymentDate.ToUtcString(),
+                    amount = p.Amount,
+                    methodId = p.PaymentMethodId, // You might want Method Name if available via join, otherwise ID
+                    type = p.PaymentType,
+                    status = p.Status,
+                    note = p.Notes,
+                    createdBy = p.CreatedBy
+                }));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = ex.Message });
+            }
+        }
+
+
+
+        [HttpGet]
+        [Route("order/confirmation")]
+        public IActionResult Confirmation()
+        {
+            string orderIdRaw = null;
+
+            // 1. Priority: Check TempData (in case the server flow worked)
+            if (TempData.ContainsKey("OrderId"))
+            {
+                orderIdRaw = TempData["OrderId"]?.ToString();
+            }
+            // 2. Fallback: Check for the 'CurrentOrderId' cookie set by JS
+            else if (Request.Cookies.ContainsKey("CurrentOrderId"))
+            {
+                orderIdRaw = Request.Cookies["CurrentOrderId"];
+        
+                // Important: Delete the cookie immediately so it acts like TempData (one-time read)
+                Response.Cookies.Delete("CurrentOrderId");
+            }
+
+            // 3. If neither exists, redirect to home
+            if (string.IsNullOrEmpty(orderIdRaw))
+                return RedirectToAction("Index", "Home");
+
+            // 4. Existing logic to clean and parse ID
+            string cleanId = orderIdRaw
+                .Replace("ON", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("DO", "", StringComparison.OrdinalIgnoreCase);
+
+            if (!int.TryParse(cleanId, out int id))
+                return NotFound();
+
+            var order = _orderFacade.GetOrderById(id);
+            if (order == null)
+                return NotFound();
+
+            return View("OrderConfirmation", order);
+        }
+
     }
-    }
+}

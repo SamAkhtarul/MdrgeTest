@@ -11,37 +11,55 @@ namespace MDUA.DataAccess
 
     {
 
-        public List<DeliveryStatusLog> GetLogsForReport(DateTime? from, DateTime? to, string search, string entityType)
+        public List<DeliveryStatusLog> GetLogsForReport(int companyId, DateTime? from, DateTime? to, string search, string entityType)
         {
             var list = new List<DeliveryStatusLog>();
 
-            // Build Dynamic SQL safely (or use a dedicated SP if preferred)
+            // ✅ FIX: Replaced complex Product loop with direct CompanyCustomer check.
+            // This matches the logic in DeliveryDataAccess and works even if an order has no items yet.
             string sql = @"
-                SELECT TOP 500 * FROM [dbo].[DeliveryStatusLog]
-                WHERE 1=1 ";
+    SELECT TOP 500 log.* FROM [dbo].[DeliveryStatusLog] log
+    
+    -- 1. Helper: Get Delivery info if needed
+    LEFT JOIN [dbo].[Delivery] d ON log.EntityType = 'Delivery' AND log.EntityId = d.Id
 
+    -- 2. Link to Order Header (using Log's ID or Delivery's ID)
+    INNER JOIN [dbo].[SalesOrderHeader] soh 
+        ON soh.Id = COALESCE(log.SalesOrderId, d.SalesOrderId)
+
+    -- 3. Security: Filter by Company via the Customer link
+    INNER JOIN [dbo].[CompanyCustomer] cc ON soh.CompanyCustomerId = cc.Id
+    
+    WHERE cc.CompanyId = @CompanyId ";
+
+            // --- Dynamic Filters ---
             if (from.HasValue)
-                sql += " AND ChangedAt >= @FromDate";
+                sql += " AND log.ChangedAt >= @FromDate";
 
             if (to.HasValue)
-                sql += " AND ChangedAt <= @ToDate";
+                sql += " AND log.ChangedAt <= @ToDate";
 
             if (!string.IsNullOrEmpty(entityType) && entityType != "All")
-                sql += " AND EntityType = @EntityType";
+                sql += " AND log.EntityType = @EntityType";
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-               
-                sql += " AND (CAST(SalesOrderId AS NVARCHAR) = @SearchTerm OR ChangedBy LIKE @SearchLike)";
+                // Search by Order ID (soh.Id) or User Name
+                sql += " AND (CAST(soh.Id AS NVARCHAR) = @SearchTerm OR log.ChangedBy LIKE @SearchLike)";
             }
 
-            sql += " ORDER BY ChangedAt DESC";
+            sql += " ORDER BY log.ChangedAt DESC";
 
             using (SqlCommand cmd = GetSQLCommand(sql))
             {
+                AddParameter(cmd, pInt32("CompanyId", companyId));
+
                 if (from.HasValue) AddParameter(cmd, pDateTime("FromDate", from.Value));
-                if (to.HasValue) AddParameter(cmd, pDateTime("ToDate", to.Value.AddDays(1).AddTicks(-1))); // Include full end day
-                if (!string.IsNullOrEmpty(entityType) && entityType != "All") AddParameter(cmd, pNVarChar("EntityType", 50, entityType));
+                // End of day adjustment
+                if (to.HasValue) AddParameter(cmd, pDateTime("ToDate", to.Value.Date.AddDays(1).AddTicks(-1)));
+
+                if (!string.IsNullOrEmpty(entityType) && entityType != "All")
+                    AddParameter(cmd, pNVarChar("EntityType", 50, entityType));
 
                 if (!string.IsNullOrWhiteSpace(search))
                 {

@@ -81,28 +81,28 @@ namespace MDUA.DataAccess
         }
         public List<VariantAttributeDto> GetVariantAttributesByProductId(int productId)
         {
+            // ✅ CHANGED: Select AttributeId and AttributeValueId
             string SQLQuery = @"
         SELECT 
             vav.VariantId,
             an.Name AS AttributeName,
-            av.Value AS AttributeValue
+            av.Value AS AttributeValue,
+            vav.AttributeId,       -- Added
+            vav.AttributeValueId   -- Added
         FROM VariantAttributeValue vav
         INNER JOIN AttributeName an ON vav.AttributeId = an.Id
         INNER JOIN AttributeValue av ON vav.AttributeValueId = av.Id
         INNER JOIN ProductVariant pv ON vav.VariantId = pv.Id
         WHERE pv.ProductId = @ProductId
-        ORDER BY vav.VariantId, vav.DisplayOrder";
+        ORDER BY vav.VariantId, vav.DisplayOrder"; // Ensures correct internal order
 
-    using SqlCommand cmd = GetSQLCommand(SQLQuery);
+            using SqlCommand cmd = GetSQLCommand(SQLQuery);
             AddParameter(cmd, pInt32("ProductId", productId));
 
-            // ✅ FIX: Open connection before calling ExecuteReader
             if (cmd.Connection.State != System.Data.ConnectionState.Open)
-            
                 cmd.Connection.Open();
-            
 
-    var list = new List<VariantAttributeDto>();
+            var list = new List<VariantAttributeDto>();
 
             using (SqlDataReader reader = cmd.ExecuteReader())
             {
@@ -112,10 +112,13 @@ namespace MDUA.DataAccess
                     {
                         VariantId = reader.GetInt32(0),
                         AttributeName = reader.GetString(1),
-                        AttributeValue = reader.GetString(2)
-                   
-                    }); 
-        }
+                        AttributeValue = reader.GetString(2),
+
+                        // ✅ MAP THE NEW IDs
+                        AttributeId = reader.GetInt32(3),
+                        AttributeValueId = reader.GetInt32(4)
+                    });
+                }
             }
             return list;
         }

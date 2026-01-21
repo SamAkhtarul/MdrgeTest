@@ -13,38 +13,84 @@ namespace MDUA.Web.UI.Controllers
         private readonly IUserLoginFacade _userLoginFacade;
         private readonly IProductFacade _productFacade;
         private readonly ILogger<HomeController> _logger;
-        private readonly IOrderFacade _orderFacade; 
+        private readonly IOrderFacade _orderFacade;
+        private readonly ICompanyFacade _companyFacade; // ✅ 1. Add Field
+        private readonly ISettingsFacade _settingsFacade; // ✅ 1. Add Field
 
-
-        public HomeController(IUserLoginFacade userLoginFacade, IProductFacade productFacade, ILogger<HomeController> logger, IOrderFacade orderFacade)
+        public HomeController(IUserLoginFacade userLoginFacade, IProductFacade productFacade, ILogger<HomeController> logger, IOrderFacade orderFacade, ICompanyFacade companyFacade, ISettingsFacade settingsFacade)
         {
             _userLoginFacade = userLoginFacade;
             _productFacade = productFacade;
             _logger = logger;
             _orderFacade = orderFacade;
+            _companyFacade = companyFacade;
+            _settingsFacade = settingsFacade;
         }
 
-        public IActionResult Index()
+        public IActionResult Index(bool preview = false)
         {
-            // 1. Fetch Data for the Homepage
-            // We wrap this in try-catch so the homepage never crashes, even if DB is empty
-            LandingPageViewModel model = new LandingPageViewModel();
+            int companyId = CurrentCompanyId;
+            ViewBag.CurrentCompanyId = companyId;
+            ViewBag.FaviconUrl = _settingsFacade.GetFavicon(companyId);
+            ViewBag.HomepageSeo = LoadHomepageSeo(companyId);
+            HomepageConfig config = null;
 
+            // 1. Load Config (Draft or Live)
+            if (preview && User.Identity.IsAuthenticated)
+            {
+                config = _companyFacade.GetHomepageDraftConfig(companyId);
+            }
+            else
+            {
+                config = _companyFacade.GetHomepageConfig(companyId);
+            }
+
+            // ✅ CRITICAL FIX: If database returned null, create a new object so we don't crash
+            if (config == null)
+            {
+                config = new HomepageConfig();
+            }
+
+            ViewBag.IsPreview = preview;
+
+            // 2. Load Categories
             try
             {
-                model = _productFacade.GetHomepageData();
+                var productData = _productFacade.GetAddProductData(companyId);
+                config.Categories = productData.Categories.ToList();
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Error loading homepage data");
-                // Model remains empty, showing a blank but working page
+                config.Categories = new List<MDUA.Entities.ProductCategory>();
             }
 
-            // 2. Pass Auth State (To toggle Login vs Dashboard button)
-            model.IsUserLoggedIn = User.Identity.IsAuthenticated;
-            model.UserName = User.Identity.Name;
+            // 3. Ensure Sections list is never null
+            if (config.Sections == null)
+            {
+                config.Sections = new List<MDUA.Entities.HomepageSection>();
+            }
 
-            return View(model);
+
+
+            return View(config);
+        }
+
+        private HomepageSeo LoadHomepageSeo(int companyId)
+        {
+            var json = _settingsFacade.GetGlobalSetting(companyId, "Homepage_SEO");
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                try
+                {
+                    return System.Text.Json.JsonSerializer.Deserialize<HomepageSeo>(json);
+                }
+                catch
+                {
+                    // ignore malformed JSON and fallback to defaults
+                }
+            }
+
+            return new HomepageSeo();
         }
 
         [Route("dashboard")]
@@ -54,15 +100,16 @@ namespace MDUA.Web.UI.Controllers
         public IActionResult Dashboard()
         {
             int userId = CurrentUserId;
-            var loginResult = _userLoginFacade.GetUserLoginById(userId);
+            // 1. Get Company ID
+            int companyId = Convert.ToInt32(User.FindFirst("CompanyId")?.Value ?? "1");
 
-            // ... (Permissions & Products loading) ...
+            var loginResult = _userLoginFacade.GetUserLoginById(userId);
             loginResult.AuthorizedActions = _userLoginFacade.GetAllUserPermissionNames(userId);
             loginResult.CanViewProducts = loginResult.AuthorizedActions.Contains("Product.View");
             bool canAddProduct = loginResult.AuthorizedActions.Contains("Product.Add");
 
             if (loginResult.CanViewProducts)
-                loginResult.LastFiveProducts = _productFacade.GetLastFiveProducts();
+                loginResult.LastFiveProducts = _productFacade.GetLastFiveProducts(companyId); // Update this too if needed
 
             if (canAddProduct)
             {
@@ -74,26 +121,56 @@ namespace MDUA.Web.UI.Controllers
             // ✅ LOAD DASHBOARD DATA (Stats, Orders, Charts)
             try
             {
-                loginResult.Stats = _orderFacade.GetDashboardMetrics();
-                loginResult.RecentOrders = _orderFacade.GetRecentOrders();
-
-                // Load Chart Data
-                loginResult.SalesTrend = _orderFacade.GetSalesTrend();
-                loginResult.OrderStatusCounts = _orderFacade.GetOrderStatusCounts();
-                loginResult.LowStockItems = _productFacade.GetLowStockVariants(5);
+                // Pass companyId to all methods
+                loginResult.Stats = _orderFacade.GetDashboardMetrics(companyId);
+                loginResult.RecentOrders = _orderFacade.GetRecentOrders(companyId);
+                loginResult.SalesTrend = _orderFacade.GetSalesTrend(companyId);
+                loginResult.OrderStatusCounts = _orderFacade.GetOrderStatusCounts(companyId);
+                loginResult.LowStockItems = _productFacade.GetLowStockVariants(companyId, 5);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load dashboard data");
-                // Init empty to avoid nulls
                 loginResult.Stats = new DashboardStats();
                 loginResult.RecentOrders = new List<SalesOrderHeader>();
                 loginResult.SalesTrend = new List<ChartDataPoint>();
                 loginResult.OrderStatusCounts = new List<ChartDataPoint>();
-                loginResult.LowStockItems = new List<LowStockItem>(); // ✅ Init empty list
+                loginResult.LowStockItems = new List<LowStockItem>();
             }
 
             return View(loginResult);
+        }
+
+        [Route("all-products")]
+        public IActionResult Shop(int? category, string query) // ✅ Added 'query' parameter
+        {
+            int companyId = 1;
+            var companyClaim = User.FindFirst("CompanyId");
+            if (companyClaim != null && int.TryParse(companyClaim.Value, out int cid))
+            {
+                companyId = cid;
+            }
+
+            var model = new LandingPageViewModel();
+
+            try
+            {
+                // ✅ Pass 'query' to the Facade
+                model.NewArrivals = _productFacade.GetShopData(companyId, category, query);
+
+                // Load Categories for Sidebar (Helper to handle login check safely)
+                model.Categories = _productFacade.GetAddProductData(companyId).Categories.ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading shop data");
+            }
+
+            // Keep state for View (Sidebar active state & Search UI)
+            ViewBag.CurrentCategory = category;
+            ViewBag.SearchQuery = query;
+
+            return View(model);
         }
     }
 }

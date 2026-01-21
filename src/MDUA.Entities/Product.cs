@@ -66,7 +66,11 @@ namespace MDUA.Entities
 
         [DataMember]
         public List<AttributeValue> PossibleValues { get; set; } = new List<AttributeValue>();
+        [DataMember]
+        public string FaviconUrl { get; set; }
 
+        [DataMember]
+        public ProductSEO SEOData { get; set; }
         [DataMember]
         public Dictionary<string, List<string>> Specifications { get; set; } = new Dictionary<string, List<string>>();
         [DataMember]

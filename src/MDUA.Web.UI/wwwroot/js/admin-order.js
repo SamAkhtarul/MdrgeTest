@@ -298,39 +298,39 @@
     });
 
     // Validation via API
-    postalInput.addEventListener('blur', function () {
-        const code = this.value.trim();
-        if (code.length < 4) { isPostalValid = false; return; }
-        postalStatus.textContent = "Checking...";
+    //postalInput.addEventListener('blur', function () {
+    //    const code = this.value.trim();
+    //    if (code.length < 4) { isPostalValid = false; return; }
+    //    postalStatus.textContent = "Checking...";
 
-        window.OrderAPI.checkPostalCode(code).then(async data => {
-            if (data.found) {
-                isPostalValid = true;
-                postalStatus.textContent = "Location found!";
-                postalStatus.className = "text-success small";
+    //    window.OrderAPI.checkPostalCode(code).then(async data => {
+    //        if (data.found) {
+    //            isPostalValid = true;
+    //            postalStatus.textContent = "Location found!";
+    //            postalStatus.className = "text-success small";
 
-                const div = data.division || data.DivisionEn;
-                const dist = data.district || data.DistrictEn;
-                const th = data.thana || data.ThanaEn;
-                const sub = data.subOffice || data.SubOfficeEn;
+    //            const div = data.division || data.DivisionEn;
+    //            const dist = data.district || data.DistrictEn;
+    //            const th = data.thana || data.ThanaEn;
+    //            const sub = data.subOffice || data.SubOfficeEn;
 
-                if (div) {
-                    divisionSelect.value = div;
+    //            if (div) {
+    //                divisionSelect.value = div;
 
-                    // Trigger auto calc for the new location
-                    autoCalculateDelivery();
+    //                // Trigger auto calc for the new location
+    //                autoCalculateDelivery();
 
-                    await loadFromApi(window.OrderAPI.getDistricts(div), districtSelect, dist);
-                    await loadFromApi(window.OrderAPI.getThanas(dist), thanaSelect, th);
-                    await loadFromApi(window.OrderAPI.getSubOffices(th), subOfficeSelect, sub);
-                }
-            } else {
-                isPostalValid = false;
-                postalStatus.textContent = "Invalid Code";
-                postalStatus.className = "text-danger small";
-            }
-        });
-    });
+    //                await loadFromApi(window.OrderAPI.getDistricts(div), districtSelect, dist);
+    //                await loadFromApi(window.OrderAPI.getThanas(dist), thanaSelect, th);
+    //                await loadFromApi(window.OrderAPI.getSubOffices(th), subOfficeSelect, sub);
+    //            }
+    //        } else {
+    //            isPostalValid = false;
+    //            postalStatus.textContent = "Invalid Code";
+    //            postalStatus.className = "text-danger small";
+    //        }
+    //    });
+    //});
 
     // ==========================================
     // 4. CUSTOMER AUTOFILL (Using OrderAPI)
@@ -520,10 +520,10 @@
                 alert("Address and Division are required for Home Delivery.");
                 return;
             }
-            if (!isPostalValid) {
-                alert("Please verify Postal Code before submitting.");
-                return;
-            }
+            //if (!isPostalValid) {
+            //    alert("Please verify Postal Code before submitting.");
+            //    return;
+            //}
         }
 
         // Check email status before submitting
@@ -553,7 +553,7 @@
             // ✅ ADDED: Send the Delivery Charge from the editable input
             DeliveryCharge: parseFloat(deliveryInput ? deliveryInput.value : 0) || 0,
 
-            TargetCompanyId: parseInt(document.getElementById('targetCompanyId')?.value) || 1,
+            TargetCompanyId: parseInt(document.getElementById('targetCompanyId')?.value) || 0,
             Confirmed: document.getElementById('confirmImmediately').checked
         };
 

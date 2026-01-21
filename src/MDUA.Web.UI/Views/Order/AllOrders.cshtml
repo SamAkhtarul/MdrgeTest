@@ -84,6 +84,40 @@
             border-right: none;
             background-color: white;
         }
+
+
+        /* Fix td checkbox to be square like th checkbox */
+        .products-table tbody td .row-checkbox {
+            width: 18px !important;
+            height: 18px !important;
+            min-width: 18px !important;
+            min-height: 18px !important;
+            margin: 0 auto !important;
+            display: block !important;
+        }
+        /* Reduce spacing between table columns */
+        .products-table th,
+        .products-table td {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+
+        /* Optional: Make it even tighter */
+        .products-table th,
+        .products-table td {
+            padding-left: 0.35rem !important;
+            padding-right: 0.35rem !important;
+        }
+        /* Make entire table more compact */
+        .products-table {
+            table-layout: auto !important;
+        }
+
+            .products-table th,
+            .products-table td {
+                padding: 0.5rem 0.35rem !important;
+                white-space: nowrap;
+            }
     </style>
 }
 
@@ -223,10 +257,10 @@
 
     <div class="glass-card-fill">
         <div class="table-scroll-lock">
-            <table class="table table-hover mb-0 align-middle products-table" id="ordersTable">
+            <table class="table table-sm table-hover mb-0 align-middle products-table" id="ordersTable">
                 <thead>
                     <tr>
-                        <th style="width: 30px;" class="text-center">
+                        <th class="text-center" style="width: 30px;">
                             <input type="checkbox" class="form-check-input" id="checkAllRows">
                         </th>
                         <th style="width: 40px;"></th>
@@ -289,11 +323,15 @@
                                 <td class="text-success fw-bold">
                                     @if (order.PaidAmount > 0)
                                     {
-                                        <span>Tk. @FormatAmount(order.PaidAmount)</span>
+                                        <div class="d-flex align-items-center gap-1 cursor-pointer hover-underline"
+                                             onclick="event.stopPropagation(); openPaymentHistory('@order.SalesOrderId');"
+                                             title="Click to view payment history">
+                                            <span>Tk. @FormatAmount(order.PaidAmount)</span>
+                                            <i class="fas fa-info-circle small opacity-50"></i>
+                                        </div>
                                     }
                                     else
                                     {
-
                                         <span class="text-muted small">-</span>
                                     }
                                 </td>
@@ -638,7 +676,46 @@
         </div>
     </div>
 </div>
-
+<div class="modal fade" id="paymentHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-light py-2">
+                <h6 class="modal-title fw-bold text-success">
+                    <i class="fas fa-receipt me-2"></i> Payment History <span id="ph_orderRef" class="text-muted small ms-2"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0 small">
+                        <thead class="bg-white">
+                            <tr>
+                                <th class="ps-3">Date</th>
+                                <th>Method</th>
+                                <th>Type</th>
+                                <th class="text-end pe-3">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ph_tableBody">
+                        </tbody>
+                        <tfoot class="bg-light fw-bold">
+                            <tr>
+                                <td colspan="3" class="text-end">Total Paid:</td>
+                                <td class="text-end pe-3 text-success" id="ph_total">0.00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div id="ph_loading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-success" role="status"></div>
+                </div>
+                <div id="ph_empty" class="text-center py-4 text-muted d-none">
+                    No payment records found.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 @{
     var orderColumns = new Dictionary<string, string> {
         {"Id", "Order ID"}, {"OrderDate", "Order Date"}, {"CustomerName", "Customer Name"},
@@ -762,7 +839,80 @@
                 document.getElementById('filterForm').submit();
             }
         }
-    </script>
+
+        // ✅ NEW: Payment History Script
+        // ✅ NEW SCRIPT: Payment History
+                function openPaymentHistory(orderRef) {
+                    if(!orderRef) return;
+
+                    // 1. Setup Modal UI
+                    const modalEl = document.getElementById('paymentHistoryModal');
+                    const modal = new bootstrap.Modal(modalEl);
+
+                    document.getElementById('ph_orderRef').textContent = `(${orderRef})`;
+                    document.getElementById('ph_tableBody').innerHTML = '';
+                    document.getElementById('ph_loading').classList.remove('d-none');
+                    document.getElementById('ph_empty').classList.add('d-none');
+                    document.getElementById('ph_total').textContent = '...';
+
+                    modal.show();
+
+                    // 2. Fetch Data from new Endpoint
+                    fetch(`/order/payments?orderRef=${orderRef}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            document.getElementById('ph_loading').classList.add('d-none');
+
+                            if (!data || data.length === 0) {
+                                document.getElementById('ph_empty').classList.remove('d-none');
+                                document.getElementById('ph_total').textContent = '0.00';
+                                return;
+                            }
+
+                            let html = '';
+                            let total = 0;
+
+                            // Basic map for Method IDs (Adjust if your IDs differ)
+                            const methods = { 1: 'Cash', 2: 'Bkash', 3: 'Nagad', 4: 'Rocket', 5: 'Bank' };
+
+                            data.forEach(p => {
+                                total += p.amount;
+                                const method = methods[p.methodId] || 'Unknown';
+                                const note = p.note ? `<div class="text-muted fst-italic" style="font-size:0.75em">${p.note}</div>` : '';
+
+                                // ✅ CONVERT UTC STRING TO LOCAL TIME
+                                const dateObj = new Date(p.date);
+                                const localDate = dateObj.toLocaleString('en-US', {
+                                    month: 'short', day: 'numeric', year: 'numeric',
+                                    hour: 'numeric', minute: 'numeric', hour12: true
+                                });
+
+                                html += `
+                                    <tr>
+                                        <td class="ps-3 py-2">
+                                            ${localDate}
+                                            <div class="text-muted" style="font-size:0.75em">by ${p.createdBy}</div>
+                                        </td>
+                                        <td class="py-2">
+                                            <span class="badge bg-secondary-subtle text-dark border">${method}</span>
+                                            ${note}
+                                        </td>
+                                        <td class="py-2">${p.type}</td>
+                                        <td class="text-end pe-3 py-2 fw-bold">Tk. ${p.amount.toFixed(2)}</td>
+                                    </tr>
+                                `;
+                            });
+
+                            document.getElementById('ph_tableBody').innerHTML = html;
+                            document.getElementById('ph_total').textContent = 'Tk. ' + total.toFixed(2);
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            document.getElementById('ph_loading').classList.add('d-none');
+                            document.getElementById('ph_empty').textContent = "Error loading details.";
+                            document.getElementById('ph_empty').classList.remove('d-none');
+                        });
+                }    </script>
 }
 
 @functions {

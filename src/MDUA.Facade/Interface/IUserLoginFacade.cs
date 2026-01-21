@@ -6,7 +6,7 @@ namespace MDUA.Facade.Interface
 {
     public interface IUserLoginFacade : ICommonFacade<UserLogin, UserLoginList, UserLoginBase>
     {
-        UserLoginResult GetUserLoginBy(string email, string password);
+        UserLoginResult GetUserLoginBy(string email, string password, int companyId);
 
         // fetch user by Id
         UserLoginResult GetUserLoginById(int userId);

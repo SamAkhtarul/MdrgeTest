@@ -11,9 +11,10 @@ using System.Security.Claims;
 var builder = WebApplication.CreateBuilder(args);
 Env.Load();
 
+//push
 // 2. Load nvironment Variables into Configuration
 builder.Configuration.AddEnvironmentVariables();
-//Transactions.TransactionManager.ImplicitDistributedTransactions = true;
+//System.Transactions.TransactionManager.ImplicitDistributedTransactions = true;
 builder.Services.AddService();
 builder.Services.AddControllersWithViews();
 builder.Services.AddHttpClient<IAiChatService, SmartGeminiChatService>();
@@ -38,7 +39,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.LoginPath = "/Account/LogIn";
+        options.LoginPath = "/login";
         options.LogoutPath = "/Account/Logout";
         options.AccessDeniedPath = "/Account/AccessDenied";
         options.ExpireTimeSpan = TimeSpan.FromMinutes(60);
@@ -140,7 +141,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
             }
         };
     });
-
+builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddDistributedMemoryCache(); // Stores session in memory
 builder.Services.AddSession(options =>
@@ -150,41 +151,65 @@ builder.Services.AddSession(options =>
     options.Cookie.IsEssential = true;
 });
 
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<ITenantResolver, TenantResolver>();
+
 builder.Services.AddSingleton<IFido2>(_ =>
+
 {
+
     // 1. Load raw values
+
     var serverDomain = builder.Configuration["Fido2:ServerDomain"];
+
     var serverName = builder.Configuration["Fido2:ServerName"];
+
     var originsStr = builder.Configuration["Fido2:Origins"];
+
     var driftConfig = builder.Configuration["Fido2:TimestampDriftTolerance"];
+
     var driftTolerance = int.Parse(driftConfig ?? "300000");
 
     // 2. Parse Origins
+
     var originsSet = new HashSet<string>(originsStr?.Split(',') ?? Array.Empty<string>());
 
-    // 3. Check for missing config (Graceful Failure)
-    if (string.IsNullOrEmpty(serverDomain) || originsSet.Count == 0)
-    {
-        // LOG the error, but DO NOT CRASH the app.
-        Console.WriteLine("****************************************************************");
-        Console.WriteLine("WARNING: Fido2 configuration is missing! Passkeys will not work.");
-        Console.WriteLine("Check your .env file or environment variables.");
-        Console.WriteLine("****************************************************************");
+    // 3. Graceful fallback (your existing logic)
 
-        // Use fallbacks to prevent null reference crashes later, 
-        // though Fido2 logic will likely reject requests.
+    if (string.IsNullOrEmpty(serverDomain) || originsSet.Count == 0)
+
+    {
+
+        Console.WriteLine("WARNING: Fido2 configuration missing. Using defaults.");
+
         serverDomain = serverDomain ?? "localhost";
+
         serverName = serverName ?? "Unknown App";
+
     }
 
+    // 4. ✅ RETURN THE INSTANCE WITH ALLOWED ORIGINS ASSIGNED
+
     return new Fido2(new Fido2Configuration
+
     {
+
         ServerDomain = serverDomain,
+
         ServerName = serverName,
-        Origins = new HashSet<string>(originsStr?.Split(',') ?? Array.Empty<string>()),
+
+        // CRITICAL FIX: Assign the parsed set here.
+
+        // If this is null/empty, it only trusts 'https://' + ServerDomain
+
+        Origins = originsSet,
+
         TimestampDriftTolerance = driftTolerance
+
     });
+
 });
+
 var app = builder.Build();
 
 // 🔍 STARTUP CONFIGURATION DEEP DIVE
@@ -222,7 +247,7 @@ else
     Console.ResetColor();
 }
 // =========================================================
-
+app.UseForwardedHeaders();
 // 3. Middlewares
 if (!app.Environment.IsDevelopment())
 {

@@ -1,4 +1,6 @@
-﻿$(document).ready(function () {
+﻿// wwwroot/js/product.js
+
+$(document).ready(function () {
 
     // ==========================================
     //  1. CONFIGURATION & HELPERS
@@ -11,7 +13,7 @@
         return arr.reduce((a, b) => a.flatMap(d => b.map(e => d.concat([e]))), [[]]);
     }
 
-    // Helper: Update Dropdown Availability
+    // Helper: Update Dropdown Availability & Visuals
     function updateAttributeDropdowns() {
         let selectedIds = [];
 
@@ -35,6 +37,11 @@
                 }
             });
         });
+
+        // Ensure one primary is always checked if attributes exist
+        if ($(".attribute-row").length > 0 && $(".is-primary-radio:checked").length === 0) {
+            $(".attribute-row:first .is-primary-radio").prop("checked", true);
+        }
     }
 
     // ==========================================
@@ -47,15 +54,29 @@
         let firstSelect = $("#addProductModal #attributes-container .attribute-row:first-child select");
         let optionsHtml = firstSelect.length ? firstSelect.html() : '<option value="">-- Select Attribute --</option>';
 
+        // Determine if this should be checked (if it's the first one)
+        let isFirst = $("#attributes-container .attribute-row").length === 0;
+        let checkedAttr = isFirst ? "checked" : "";
+
         let row = `
-            <div class="attribute-row mb-2" data-attr-index="${attrIndex}">
+            <div class="attribute-row mb-2 p-2 border rounded bg-white" data-attr-index="${attrIndex}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    
+                    <div class="form-check" title="This attribute controls the product image (e.g. Color)">
+                        <input class="form-check-input is-primary-radio" type="radio" name="primaryAttributeGroup" id="primary_${attrIndex}" ${checkedAttr}>
+                        <label class="form-check-label small fw-bold text-primary" for="primary_${attrIndex}">
+                            Primary Visual
+                        </label>
+                    </div>
+
+                    <button type="button" class="btn btn-sm btn-outline-danger remove-attribute border-0" style="padding: 0 5px;">&times;</button>
+                </div>
+
                 <select name="Attributes[${attrIndex}].AttributeId" 
                         class="attribute-select form-control-modal form-select form-select-sm">
                     ${optionsHtml}
                 </select>
                 <div class="attribute-values-container mt-2"></div>
-                <button type="button" 
-                    class="btn btn-sm btn-outline-danger remove-attribute mt-1">x</button>
             </div>
         `;
         $("#addProductModal #attributes-container").append(row);
@@ -66,7 +87,7 @@
     // ❌ Remove attribute row
     $("#addProductModal").on("click", ".remove-attribute", function () {
         $(this).closest(".attribute-row").remove();
-        updateAttributeDropdowns();
+        updateAttributeDropdowns(); // Will auto-select new primary if needed
         generateVariants();
     });
 
@@ -107,7 +128,7 @@
                     let valName = v.value || v.Value || v.name || v.Name;
 
                     container.append(`
-                    <div class="form-check">
+                    <div class="form-check form-check-inline">
                         <input type="checkbox" 
                                class="form-check-input attribute-value-checkbox" 
                                id="attr_val_${valId}_${Date.now()}"
@@ -135,12 +156,18 @@
 
     // Refresh variants when checkbox changes
     $("#addProductModal").on("change", ".attribute-value-checkbox", generateVariants);
+    // Refresh variants when Primary Radio changes (to update visuals if we add logic later)
+    $("#addProductModal").on("change", ".is-primary-radio", function() {
+        // Optional: Highlight the primary column in variant table if we wanted
+    });
 
     function generateVariants() {
         let variantsContainer = $("#addProductModal #variants-container");
         variantsContainer.html(""); // Clear existing
 
         let selectedPerAttribute = [];
+
+        // Iterate rows to build the arrays
         $("#addProductModal .attribute-row").each(function () {
             let checked = $(this).find(".attribute-value-checkbox:checked");
             if (checked.length > 0) {
@@ -204,38 +231,22 @@
     // Refresh variants when Product Name changes
     $("#addProductModal input[name='ProductName']").on("input", function () {
         generateVariants();
-        // Also trigger slug logic (handled below)
     });
 
     // Remove single variant
     $("#addProductModal").on("click", ".remove-variant", function () {
         $(this).closest(".variant-row").remove();
-
-        let remainingRows = $("#addProductModal #variants-container .variant-row");
-        remainingRows.each(function (newIndex) {
-            let $row = $(this);
-            $row.find("input").each(function () {
-                let $input = $(this);
-                let oldName = $input.attr("name");
-                if (oldName) {
-                    let newName = oldName.replace(/^(Variants\[)\d+/, `$1${newIndex}`);
-                    $input.attr("name", newName);
-                }
-            });
-        });
-
-        if (remainingRows.length === 0) {
-            $("#addProductModal #variants-container .variant-header-row").remove();
-        }
+        // Re-indexing handled on submit usually, but good to keep clean
     });
 
     // Modal Reset Logic
     $('#addProductModal').on('hidden.bs.modal', function () {
         let $form = $(this).find('form');
         $form[0].reset();
-        $form.find('.attribute-row:not(:first)').remove();
+        $form.find('.attribute-row').remove(); // Remove all rows
         $form.find('.attribute-values-container').html('');
         $form.find('#variants-container').html('');
+        // Add one empty default row back? Optional.
         updateAttributeDropdowns();
 
         // Reset Slug UI
@@ -244,26 +255,9 @@
         $('#btn-save-product').prop('disabled', false).text('Create Product');
     });
 
-    // Prevent Form Submit on Enter key
-    $("#addProductModal").on("keydown", "input", function (e) {
-        if (e.key === "Enter" || e.keyCode === 13) {
-            e.preventDefault();
-        }
-    });
-
-    // Prevent submitting empty attribute values
-    $('form').on('submit', function (e) {
-        // Find all attribute dropdowns
-        const selects = document.querySelectorAll('select[name^="Attributes"]');
-        selects.forEach(select => {
-            if (!select.value) select.disabled = true; // Disable empty ones so they don't send
-        });
-    });
-
     // ==========================================
-    //  4. SLUG & NAME LOGIC (NEW VALIDATION)
+    //  4. SLUG & NAME LOGIC
     // ==========================================
-
     const $nameInput = $('input[name="ProductName"]');
     const $slugInput = $('#slugInput');
     const $slugError = $('#slug-error');
@@ -273,70 +267,76 @@
 
     function checkSlugAvailability(slug) {
         if (!slug) return;
-
-        // Visual feedback (optional class you can add to CSS)
         $slugInput.addClass('loading-slug');
-
         $.get('/product/check-slug', { slug: slug })
             .done(function (data) {
                 $slugInput.removeClass('loading-slug');
-
                 if (data.exists) {
-                    // ❌ Slug Taken
                     $slugInput.addClass('is-invalid').removeClass('is-valid');
                     $slugError.show();
-                    $submitBtn.prop('disabled', true);
-                    $submitBtn.text('Fix Slug Error');
+                    $submitBtn.prop('disabled', true).text('Fix Slug Error');
                 } else {
-                    // ✅ Slug Available
                     $slugInput.removeClass('is-invalid').addClass('is-valid');
                     $slugError.hide();
-                    $submitBtn.prop('disabled', false);
-                    $submitBtn.text('Create Product');
+                    $submitBtn.prop('disabled', false).text('Create Product');
                 }
-            })
-            .fail(function () {
-                // Determine if 400/500 error or simple network fail
-                $slugInput.removeClass('loading-slug');
             });
     }
 
     $slugInput.on('input', function () {
         const val = $(this).val().trim();
-        if (val !== '') {
-            isSlugManuallyEdited = true;
-        }
-
-        // Reset UI while typing
+        if (val !== '') isSlugManuallyEdited = true;
         $slugInput.removeClass('is-valid is-invalid');
         $slugError.hide();
         $submitBtn.prop('disabled', false);
-
         clearTimeout(slugTimer);
-        if (val) {
-            slugTimer = setTimeout(() => checkSlugAvailability(val), 500);
-        }
+        if (val) slugTimer = setTimeout(() => checkSlugAvailability(val), 500);
     });
 
     $nameInput.on('input', function () {
-        // Run variant generation
         generateVariants();
-
         if (!isSlugManuallyEdited) {
             const name = $(this).val();
-            const slug = name.toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, '')
-                .trim()
-                .replace(/\s+/g, '-')
-                .replace(/-+/g, '-');
-
+            const slug = name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-');
             $slugInput.val(slug);
-
             clearTimeout(slugTimer);
-            if (slug) {
-                slugTimer = setTimeout(() => checkSlugAvailability(slug), 500);
-            }
+            if (slug) slugTimer = setTimeout(() => checkSlugAvailability(slug), 500);
         }
+    });
+
+    // ==========================================
+    //  5. FORM SUBMISSION (CRITICAL RE-ORDERING)
+    // ==========================================
+    $('form').on('submit', function (e) {
+
+        // A. Prevent submitting empty attribute selects
+        const selects = document.querySelectorAll('select[name^="Attributes"]');
+        selects.forEach(select => {
+            if (!select.value) select.disabled = true;
+        });
+
+        // B. PRIMARY ATTRIBUTE RE-ORDERING
+        // 1. Find the row that contains the checked radio button
+        var $primaryRow = $('.is-primary-radio:checked').closest('.attribute-row');
+
+        // 2. If found, move it to the top of the container
+        if ($primaryRow.length > 0) {
+            var $container = $('#attributes-container');
+            // Detach and prepend to make it the first child in the DOM
+            $primaryRow.detach().prependTo($container);
+        }
+
+        // 3. Re-index all attribute rows so the Server sees Primary as Index 0
+        $('#attributes-container .attribute-row').each(function(index) {
+            // Update Select Name
+            $(this).find('select.attribute-select').attr('name', `Attributes[${index}].AttributeId`);
+
+            // Note: We don't strictly need to re-index the checkbox values inside because 
+            // the Variants are generated separately. But the "Attributes" list sent to server 
+            // will now have the Primary one at Index 0.
+        });
+
+        // 4. Proceed with submission...
     });
 
 });

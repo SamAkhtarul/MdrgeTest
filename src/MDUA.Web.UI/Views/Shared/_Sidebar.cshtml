@@ -10,13 +10,25 @@
     // --- PAGE TYPE CHECKS ---
     bool isProductPage = currentController == "Product";
     bool isInventoryPage = currentController == "Purchase";
-    // ✅ FIX: Ensure Shipment controller is recognized
+    bool isVendorPage = currentController == "Vendor";
     bool isShipmentPage = currentController == "Shipment";
     bool isCustomerPage = currentController == "Customer";
     bool isOrderPage = currentController == "Order";
-    bool isSettingsPage = currentController == "Settings";
     bool isReportPage = currentController == "Report";
-    // --- COMPANY LOGO LOGIC (Kept as is) ---
+
+    // ✅ ADDED: Subscription Page Check
+    bool isSubscriptionPage = currentController == "Subscription";
+    bool isAttributePage = currentController == "Attribute";
+
+    // ✅ UPDATED: CMS Page Check 
+    // Logic: If controller is Cms OR if we are on the Homepage (even if controller is Settings)
+    bool isCmsPage = currentController == "Cms" || (currentController == "Settings" && currentAction == "Homepage");
+
+    // ✅ UPDATED: Settings Page Check
+    // Logic: If controller is Settings BUT exclude Homepage (since it is visually in CMS now)
+    bool isSettingsPage = currentController == "Settings" && currentAction != "Homepage";
+
+    // --- COMPANY LOGO LOGIC ---
     string companyName = "MDUA Admin";
     string companyLogo = null;
     var companyIdClaim = User.FindFirst("CompanyId")?.Value;
@@ -33,7 +45,8 @@
 
 <div class="sidebar glass-panel d-flex flex-column h-100">
 
-    <div class="d-flex align-items-center mb-4 ps-2 pt-2">
+    <!-- We changed the div to an 'a' tag and added href="/". We also added text-decoration-none and text-reset so it doesn't look like a generic blue link -->
+    <a href="/" class="d-flex align-items-center mb-4 ps-2 pt-2 text-decoration-none text-reset">
         @if (!string.IsNullOrEmpty(companyLogo))
         {
             <img src="@companyLogo" alt="Logo" class="me-2 rounded-circle" style="width: 80px; height: 80px; object-fit: cover; border: 2px solid rgba(255,255,255,0.2);">
@@ -47,7 +60,6 @@
                 }
                 else
                 {
-
                     <text>M</text>
                 }
             </div>
@@ -56,8 +68,7 @@
             <div class="fw-bold text-truncate" style="max-width: 150px;" title="@companyName">@companyName</div>
             <div class="small text-muted" style="font-size: 0.7rem; letter-spacing: 0.1em;">MANAGEMENT</div>
         </div>
-    </div>
-
+    </a>
     <div class="mb-2 text-uppercase small text-muted fw-semibold ps-3">Menu</div>
     <ul class="nav nav-pills flex-column mb-auto">
 
@@ -75,12 +86,19 @@
             </a>
             <div class="collapse @(isProductPage ? "show" : "")" id="productsMenu">
                 <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
-                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "AllProducts" ? "active" : "")" href="@Url.Action("AllProducts", "Product")">Product List</a></li>
-                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "Add" ? "active" : "")" href="@Url.Action("Add", "Product")">Add Product</a></li>
+                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "AllProducts" && isProductPage ? "active" : "")" href="@Url.Action("AllProducts", "Product")">Product List</a></li>
+                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "Add" && isProductPage ? "active" : "")" href="@Url.Action("Add", "Product")">Add Product</a></li>
                 </ul>
             </div>
         </li>
 
+        <li class="nav-item">
+            <a class="nav-link nav-link-sm @(currentController == "ProductCategory" ? "active" : "")" href="@Url.Action("Index", "ProductCategory")">
+                <span>📂</span> Categories
+            </a>
+        </li>
+
+        <li class="nav-item"><a class="nav-link @(isAttributePage ? "active" : "")" href="@Url.Action("Index", "Attribute")"><span>🏷️</span> Attributes      </a></li>
         <li class="nav-item">
             <a class="nav-link d-flex justify-content-between align-items-center @(isInventoryPage ? "active-parent" : "collapsed")"
                data-bs-toggle="collapse" href="#inventoryMenu" role="button" aria-expanded="@(isInventoryPage ? "true" : "false")" aria-controls="inventoryMenu">
@@ -103,31 +121,35 @@
         </li>
 
         <li class="nav-item">
-            <a class="nav-link d-flex justify-content-between align-items-center"
-               data-bs-toggle="collapse" href="#vendorSubMenu" role="button" aria-expanded="false" aria-controls="vendorSubMenu">
-
+            <a class="nav-link d-flex justify-content-between align-items-center @(isVendorPage ? "active-parent" : "collapsed")"
+               data-bs-toggle="collapse" href="#vendorSubMenu" role="button"
+               aria-expanded="@(isVendorPage ? "true" : "false")" aria-controls="vendorSubMenu">
                 <span>
                     <i class="fas fa-store"></i> <span class="ms-2">Vendors</span>
                 </span>
-
                 <span class="dropdown-arrow">▾</span>
             </a>
-
-            <div class="collapse" id="vendorSubMenu">
-                <ul class="nav flex-column ms-3 mt-1">
+            <div class="collapse @(isVendorPage ? "show" : "")" id="vendorSubMenu">
+                <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm" href="/Vendor/Index">
-                            <i class="fas fa-list me-2"></i> Vendors List
+                        <a class="nav-link nav-link-sm @(currentAction == "Index" && isVendorPage ? "active" : "")" href="@Url.Action("Index", "Vendor")">
+                            Vendors List
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm" href="/Vendor/Add">
-                            <i class="fas fa-plus me-2"></i> Add Vendor
+                        <a class="nav-link nav-link-sm @(currentAction == "Add" && isVendorPage ? "active" : "")" href="@Url.Action("Add", "Vendor")">
+                            Add Vendor
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link nav-link-sm @(currentAction == "AddPayment" && isVendorPage ? "active" : "")" href="@Url.Action("AddPayment", "Vendor")">
+                            Payments
                         </a>
                     </li>
                 </ul>
             </div>
         </li>
+
         <li class="nav-item">
             <a class="nav-link d-flex justify-content-between align-items-center @(isOrderPage ? "active-parent" : "collapsed")"
                data-bs-toggle="collapse" href="#OrdersMenu" role="button" aria-expanded="@(isOrderPage ? "true" : "false")" aria-controls="OrdersMenu">
@@ -136,55 +158,115 @@
             </a>
             <div class="collapse @(isOrderPage ? "show" : "")" id="OrdersMenu">
                 <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
-                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "AllOrders" ? "active" : "")" href="@Url.Action("AllOrders", "Order")">Order List</a></li>
-                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "Add" ? "active" : "")" href="@Url.Action("Add", "Order")">Add Order</a></li>
+                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "AllOrders" && isOrderPage ? "active" : "")" href="@Url.Action("AllOrders", "Order")">Order List</a></li>
+                    <li class="nav-item"><a class="nav-link nav-link-sm @(currentAction == "Add" && isOrderPage ? "active" : "")" href="@Url.Action("Add", "Order")">Add Order</a></li>
                 </ul>
             </div>
         </li>
 
         <li class="nav-item">
             <a class="nav-link d-flex justify-content-between align-items-center @(isShipmentPage ? "active-parent" : "collapsed")"
-               data-bs-toggle="collapse"
-               href="#shipmentMenu"
-               role="button"
-               aria-expanded="@(isShipmentPage ? "true" : "false")"
-               aria-controls="shipmentMenu">
+               data-bs-toggle="collapse" href="#shipmentMenu" role="button"
+               aria-expanded="@(isShipmentPage ? "true" : "false")" aria-controls="shipmentMenu">
                 <span><span>🚚</span> Shipment</span>
                 <span class="dropdown-arrow">▾</span>
             </a>
             <div class="collapse @(isShipmentPage ? "show" : "")" id="shipmentMenu">
                 <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm @(currentAction == "DeliveryList" ? "active" : "")"
-                           href="@Url.Action("DeliveryList", "Shipment")">
+                        <a class="nav-link nav-link-sm @(currentAction == "DeliveryList" ? "active" : "")" href="@Url.Action("DeliveryList", "Shipment")">
                             Delivery List
                         </a>
                     </li>
                 </ul>
             </div>
         </li>
+
         <li class="nav-item">
             <a class="nav-link d-flex justify-content-between align-items-center @(isReportPage ? "active-parent" : "collapsed")"
-               data-bs-toggle="collapse"
-               href="#reportsMenu"
-               role="button"
-               aria-expanded="@(isReportPage ? "true" : "false")"
-               aria-controls="reportsMenu">
+               data-bs-toggle="collapse" href="#reportsMenu" role="button"
+               aria-expanded="@(isReportPage ? "true" : "false")" aria-controls="reportsMenu">
                 <span><span>📈</span> Reports & Audit</span>
                 <span class="dropdown-arrow">▾</span>
             </a>
             <div class="collapse @(isReportPage ? "show" : "")" id="reportsMenu">
                 <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm @(currentAction == "DeliveryLogs" ? "active" : "")"
-                           href="@Url.Action("DeliveryLogs", "Report")">
+                        <a class="nav-link nav-link-sm @(currentAction == "DeliveryLogs" ? "active" : "")" href="@Url.Action("DeliveryLogs", "Report")">
                             Delivery Logs
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm @(currentAction == "SalesSummary" ? "active" : "")"
-                           href="#">
+                        <a class="nav-link nav-link-sm @(currentAction == "SalesSummary" ? "active" : "")" href="#">
                             Sales Summary
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </li>
+
+        @* --- START SUBSCRIPTION MENU --- *@
+        @if (User.IsInRole("Super Admin") || User.IsInRole("Admin"))
+        {
+            <li class="nav-item">
+                <a class="nav-link d-flex justify-content-between align-items-center @(isSubscriptionPage ? "active-parent" : "collapsed")"
+                   data-bs-toggle="collapse" href="#subscriptionMenu" role="button" aria-expanded="@(isSubscriptionPage ? "true" : "false")" aria-controls="subscriptionMenu">
+                    <span><span>💳</span> Subscription</span>
+                    <span class="dropdown-arrow">▾</span>
+                </a>
+                <div class="collapse @(isSubscriptionPage ? "show" : "")" id="subscriptionMenu">
+                    <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
+
+                        @* ONLY SUPER ADMIN sees these *@
+                        @if (User.IsInRole("Super Admin"))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link nav-link-sm @(currentAction == "PlanList" ? "active" : "")" href="@Url.Action("PlanList", "Subscription")">
+                                    Manage Plans
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link nav-link-sm @(currentAction == "CompanySubscriptionList" ? "active" : "")" href="@Url.Action("CompanySubscriptionList", "Subscription")">
+                                    Client Contracts
+                                </a>
+                            </li>
+                        }
+
+                        @* BOTH Super Admin and Company Admin see this *@
+                        <li class="nav-item">
+                            <a class="nav-link nav-link-sm @(currentAction == "MySubscription" ? "active" : "")" href="@Url.Action("MySubscription", "Subscription")">
+                                My Current Plan
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </li>
+        }
+        @* --- END SUBSCRIPTION MENU --- *@
+
+        @* --- CMS PAGES --- *@
+        <li class="nav-item">
+            <a class="nav-link d-flex justify-content-between align-items-center @(isCmsPage ? "active-parent" : "collapsed")"
+               data-bs-toggle="collapse" href="#cmsMenu" role="button" aria-expanded="@(isCmsPage ? "true" : "false")" aria-controls="cmsMenu">
+                <span><span>📄</span> CMS Pages</span>
+                <span class="dropdown-arrow">▾</span>
+            </a>
+            <div class="collapse @(isCmsPage ? "show" : "")" id="cmsMenu">
+                <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
+                    <li class="nav-item">
+                        <a class="nav-link nav-link-sm @(currentAction == "Index" ? "active" : "")" href="@Url.Action("Index", "Cms")">
+                            All Pages
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link nav-link-sm @(currentAction == "Create" ? "active" : "")" href="@Url.Action("Create", "Cms")">
+                            Add Page
+                        </a>
+                    </li>
+                    @* ✅ MOVED: Homepage Layout moved from Settings to CMS *@
+                    <li class="nav-item">
+                        <a class="nav-link nav-link-sm @(currentAction == "Homepage" ? "active" : "")" href="@Url.Action("Homepage", "Settings")">
+                            Homepage Layout
                         </a>
                     </li>
                 </ul>
@@ -199,16 +281,19 @@
             </a>
             <div class="collapse @(isSettingsPage ? "show" : "")" id="settingsMenu">
                 <ul class="nav flex-column ms-3 mt-1 border-start border-2 border-light ps-2">
-                    @* ✅ NEW ITEM HERE *@
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm @(currentAction == "CompanyProfile" ? "active" : "")"
-                           href="@Url.Action("CompanyProfile", "Settings")">
+                        <a class="nav-link nav-link-sm @(currentAction == "CompanyProfile" ? "active" : "")" href="@Url.Action("CompanyProfile", "Settings")">
                             Company Profile
                         </a>
                     </li>
+
                     <li class="nav-item">
-                        <a class="nav-link nav-link-sm @(currentController == "EmailTemplate" ? "active" : "")"
-                           href="@Url.Action("Index", "EmailTemplate")">
+                        <a class="nav-link nav-link-sm @(currentAction == "Analytics" ? "active" : "")" href="@Url.Action("Analytics", "Settings")">
+                            Analytics
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link nav-link-sm @(currentController == "EmailTemplate" ? "active" : "")" href="@Url.Action("Index", "EmailTemplate")">
                             Email Templates
                         </a>
                     </li>

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.Serialization;
 using MDUA.Entities.Bases;
-
+using System.Collections.Generic; // ✅ Required
 namespace MDUA.Entities
 {
     public partial class SalesOrderHeader
@@ -47,6 +47,8 @@ namespace MDUA.Entities
         public decimal ActualLogisticsCost { get; set; }
         [DataMember]
         public virtual CompanyCustomer CompanyCustomer { get; set; }
+        
+        [DataMember] public List<SalesOrderItem> OrderItems { get; set; } = new List<SalesOrderItem>();
     }
    
         public class EmailResult
@@ -63,6 +65,13 @@ namespace MDUA.Entities
             public string EmailMessage { get; set; }
             public string SmsMessage { get; set; }
             public bool IsSuccess => EmailSent || SmsSent; // At least one succeeded
+        }
+        
+        // ✅ ADD THIS CLASS
+        public class SalesOrderItem
+        {
+            [DataMember] public int ProductVariantId { get; set; }
+            [DataMember] public int OrderQuantity { get; set; }
         }
     }
 

@@ -131,11 +131,10 @@ namespace MDUA.Facade
                                         .Select(p => p.Name)
                                         .ToList();
         }
-        public UserLoginResult GetUserLoginBy(string email, string password)
+        public UserLoginResult GetUserLoginBy(string email, string password, int companyId)
         {
             UserLoginResult result = new UserLoginResult();
-            var obUser = _UserLoginDataAccess.GetUserLogin(email, password);
-
+            var obUser = _UserLoginDataAccess.GetUserLogin(email, password, companyId);
             if (obUser == null)
             {
                 result.IsSuccess = false;

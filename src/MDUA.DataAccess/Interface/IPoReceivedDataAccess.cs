@@ -31,7 +31,9 @@ namespace MDUA.DataAccess.Interface
 
 	public interface IPoReceivedDataAccess : ICommonDataAccess<PoReceived, PoReceivedList, PoReceivedBase>
 	{
-        int Insert(int poReqId, int qty, decimal price, string invoice, string remarks, SqlTransaction transaction);
+		int Insert(int poReqId, int qty, decimal price, string invoice, string remarks, SqlTransaction transaction, decimal totalPaid = 0, string paymentStatus = "Unpaid");
 
+		void ReceiveBulkStock(List<dynamic> items, string invoice, string remarks, decimal totalPaid, int? paymentMethodId, int vendorId, string username);
+        int? GetBulkOrderIdByInvoice(string invoice, int vendorId);
     }
 }

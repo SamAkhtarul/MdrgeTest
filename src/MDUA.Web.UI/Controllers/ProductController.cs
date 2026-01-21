@@ -1,6 +1,7 @@
 ﻿using MDUA.Entities;
 using MDUA.Entities.Bases;
 using MDUA.Facade.Interface;
+using MDUA.Framework.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,13 +14,16 @@ namespace MDUA.Web.UI.Controllers
         private readonly IWebHostEnvironment _webHostEnvironment;
         private readonly IPaymentMethodFacade _paymentMethodFacade;
         private readonly ISettingsFacade _settingsFacade;
+        private readonly ISubscriptionSystemFacade _subscriptionFacade;
 
-        public ProductController(IProductFacade productFacade, IWebHostEnvironment webHostEnvironment, IPaymentMethodFacade paymentMethodFacade, ISettingsFacade settingsFacade)
+        public ProductController(IProductFacade productFacade, IWebHostEnvironment webHostEnvironment, IPaymentMethodFacade paymentMethodFacade, ISettingsFacade settingsFacade, ISubscriptionSystemFacade subscriptionFacade)
         {
             _productFacade = productFacade;
             _webHostEnvironment = webHostEnvironment;
             _paymentMethodFacade = paymentMethodFacade;
             _settingsFacade = settingsFacade;
+            _subscriptionFacade = subscriptionFacade;
+
         }
 
         #region Products
@@ -34,7 +38,7 @@ namespace MDUA.Web.UI.Controllers
 
             if (model == null) return NotFound();
             // --- FETCH PAYMENT METHODS ---
-            var companyId = model.CompanyId; // Assuming Product entity has CompanyId
+            var companyId = model.CompanyId; 
 
             // 1. Get all settings (merged)
             var allSettings = _settingsFacade.GetCompanyPaymentSettings(companyId);
@@ -55,8 +59,22 @@ namespace MDUA.Web.UI.Controllers
         {
             // Permission Check
             if (!HasPermission("Product.Add")) return HandleAccessDenied();
+            // 🛑  IsProductLocked  (Not IsSubscriptionLocked)
+           if (_subscriptionFacade.IsProductLocked(CurrentCompanyId, out int current, out int limit))
+             {
+                 // Pass "Product" as the feature
+                 return RedirectToAction("LimitReached", "Subscription", new
+                 {
+                     current = current,
+                     limit = limit,
+                     feature = "Product" // <--- Important
+                 });
+             }
 
-            var model = _productFacade.GetAddProductData(CurrentUserId);
+            // 2. Get Company Context
+            int companyId = CurrentCompanyId;
+            if (companyId <= 0) return RedirectToAction("Login", "Account");
+            var model = _productFacade.GetAddProductData(companyId);
 
             return View(model);
         }
@@ -96,24 +114,21 @@ namespace MDUA.Web.UI.Controllers
         [HttpGet]
         public IActionResult AllProducts(string search)
         {
-            // 1. Permission Check (Kept from your existing code)
             if (!HasPermission("Product.View")) return HandleAccessDenied();
 
             IEnumerable<Product> products;
-
-            // 2. Pass the search term back to the View (so the input box remembers it)
             ViewData["CurrentSearch"] = search;
 
+            // ✅ FIX: Pass CurrentCompanyId to the methods
             if (!string.IsNullOrWhiteSpace(search))
             {
-                // 3. If a search term exists, use the Search method
-                // Note: Ensure _productFacade.SearchProducts(search) is implemented in your Facade
-                products = _productFacade.SearchProducts(search);
+                // Pass CompanyId here
+                products = _productFacade.SearchProducts(search, CurrentCompanyId);
             }
             else
             {
-                // 4. Default: Show all products (Your existing method)
-                products = _productFacade.GetAllProductsWithCategory();
+                // Pass CompanyId here
+                products = _productFacade.GetAllProductsWithCategory(CurrentCompanyId);
             }
 
             return View(products);
@@ -133,25 +148,26 @@ namespace MDUA.Web.UI.Controllers
         }
 
         [HttpGet]
-        [Route("product/search-ajax")] // This defines the URL as /product/search-ajax
+        [Route("product/search-ajax")]
         public IActionResult SearchProductsAjax(string query)
         {
             IEnumerable<Product> model;
 
             if (string.IsNullOrWhiteSpace(query))
             {
-                // If search is empty, return default top 5
-                model = _productFacade.GetAllProductsWithCategory();
+                // ✅ FIX: Pass CurrentCompanyId to restrict to logged-in user's data
+                model = _productFacade.GetAllProductsWithCategory(CurrentCompanyId);
             }
             else
             {
-                // Perform Search
-                model = _productFacade.SearchProducts(query);
+                // ✅ FIX: Pass CurrentCompanyId to restrict search results
+                model = _productFacade.SearchProducts(query, CurrentCompanyId);
             }
 
             // This returns ONLY the table rows to the JavaScript
             return PartialView("_ProductTableRows", model);
         }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         [Route("product/toggle-status")]
@@ -186,7 +202,6 @@ namespace MDUA.Web.UI.Controllers
         [Route("product/delete-confirmed")]
         public IActionResult DeleteConfirmed(int productId)
         {
-            // Permission Check
             if (!HasPermission("Product.Delete")) return HandleAccessDenied();
 
             try
@@ -199,11 +214,22 @@ namespace MDUA.Web.UI.Controllers
                 }
                 return Json(new { success = false, message = "Product not found." });
             }
-            catch (Exception ex)
+            catch (WorkflowException wfEx)
             {
-                return Json(new { success = false, message = "An error occurred: " + ex.Message });
+                // BUSINESS RULE FAILURE (Soft Delete Triggered)
+                return Json(new
+                {
+                    success = false,
+                    message = wfEx.Message,
+                    wasDeactivated = true // <--- ADD THIS FLAG
+                });
+            }
+            catch (Exception)
+            {
+                return Json(new { success = false, message = "Something went wrong..." });
             }
         }
+
 
         #endregion
 
@@ -494,30 +520,104 @@ namespace MDUA.Web.UI.Controllers
             return PartialView("_VariantImagesPartial", images);
         }
 
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        [Route("product/upload-variant-image")]
-        public async Task<IActionResult> UploadVariantImage(int variantId, IFormFile file)
+[HttpPost]
+[ValidateAntiForgeryToken]
+[Route("product/upload-variant-image")]
+public async Task<IActionResult> UploadVariantImage(int variantId, IFormFile file)
+{
+    // 1. Permission Check
+    if (!HasPermission("VariantImage.Add")) return HandleAccessDenied();
+
+    if (file == null || file.Length == 0)
+        return Json(new { success = false, message = "No file received" });
+
+    // 2. Save File to Disk
+    var fileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
+    // We save to a folder based on the specific variantId initially
+    var folderPath = Path.Combine(_webHostEnvironment.WebRootPath, "images", "variants", variantId.ToString());
+
+    if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
+
+    var filePath = Path.Combine(folderPath, fileName);
+    using (var stream = new FileStream(filePath, FileMode.Create))
+    {
+        await file.CopyToAsync(stream);
+    }
+
+    string dbPath = $"/images/variants/{variantId}/{fileName}";
+
+    // 3. Save to Database (Target Variant)
+    _productFacade.AddVariantImage(variantId, dbPath, CurrentUserName);
+
+    // =================================================================================
+    // SMART SYNC START: Apply this image to all siblings with same Primary Attribute
+    // =================================================================================
+    try
+    {
+        // A. Get details of the current variant to find ProductId
+        var variantInfo = _productFacade.GetVariant(variantId); 
+        
+        if (variantInfo != null)
         {
-            // Permission Check
-            if (!HasPermission("VariantImage.Add")) return HandleAccessDenied();
+            int productId = variantInfo.ProductId;
 
-            var fileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
-            var folderPath = Path.Combine(_webHostEnvironment.WebRootPath, "images", "variants", variantId.ToString());
+            // B. Get ALL variants and attributes for this product
+            // This returns the structure: { Attributes: [...], Variants: [...] }
+            var fullData = _productFacade.GetVariantsWithAttributes(productId);
 
-            if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
-
-            var filePath = Path.Combine(folderPath, fileName);
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            if (fullData != null && fullData.Attributes != null && fullData.Variants != null)
             {
-                await file.CopyToAsync(stream);
+                // C. Identify Primary Attribute (DisplayOrder 1)
+                var primaryAttribute = fullData.Attributes.FirstOrDefault(); 
+
+                if (primaryAttribute != null)
+                {
+                    // D. Find the Primary Value of the CURRENT variant
+                    // First need to find which AttributeValueId corresponds to the Primary Attribute
+                    var currentVariantData = fullData.Variants.FirstOrDefault(v => v.Id == variantId);
+                    
+                    if (currentVariantData != null && currentVariantData.AttributeValueIds != null)
+                    {
+                        //  'AttributeValueIds' is a list ordered by the Attribute Display Order.
+                        // So index 0 corresponds to the Primary Attribute.
+                        var primaryValueId = currentVariantData.AttributeValueIds.FirstOrDefault();
+
+                        if (primaryValueId > 0)
+                        {
+                            // E. Loop through SIBLINGS and Sync
+                            foreach (var sibling in fullData.Variants)
+                            {
+                                // Skip self
+                                if (sibling.Id == variantId) continue;
+
+                                // Check if Sibling has the SAME Primary Value (e.g., Both are "Red")
+                                var siblingPrimaryValue = sibling.AttributeValueIds.FirstOrDefault();
+
+                                if (siblingPrimaryValue == primaryValueId)
+                                {
+                                    // COPY THE IMAGE RECORD
+                                    //  use the same 'dbPath' so they share the physical file
+                                    _productFacade.AddVariantImage(sibling.Id, dbPath, CurrentUserName);
+                                }
+                            }
+                        }
+                    }
+                }
             }
-
-            string dbPath = $"/images/variants/{variantId}/{fileName}";
-            _productFacade.AddVariantImage(variantId, dbPath, CurrentUserName);
-
-            return Json(new { success = true });
         }
+    }
+    catch (Exception ex)
+    {
+        // Fail silently on sync errors so  doesn't block the main upload
+         Console.WriteLine(ex.Message);
+    }
+    // =================================================================================
+    //  SMART SYNC END
+    // =================================================================================
+
+    return Json(new { success = true });
+}
+
 
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -576,25 +676,23 @@ namespace MDUA.Web.UI.Controllers
         [Route("product/get-attribute-values")]
         public IActionResult GetAttributeValues(int attributeId)
         {
-            // Optional: Add permission check if needed
+            //  Add permission check
             // if (!HasPermission("Product.Add")) return HandleAccessDenied();
 
-            // Fetch data from your Facade
+            // Fetch data from  Facade
             var values = _productFacade.GetAttributeValues(attributeId);
 
             // Return as JSON. 
-            // We project to an anonymous object to ensure the JS receives 'id' and 'value'
-            // exactly as the script expects (lowercase).
-            return Json(values.Select(v => new { 
-                id = v.Id, 
-                value = v.Value // Or v.Name, depending on your Entity
+            return Json(values.Select(v => new {
+                id = v.Id,
+                value = v.Value 
             }));
         }
 
 
 
         #endregion
-        // ... inside ProductController class ...
+       
 
         #region Product Videos
 
@@ -664,6 +762,78 @@ namespace MDUA.Web.UI.Controllers
         }
 
         #endregion
+        #region Product SEO
+        [HttpGet]
+        [Route("product/get-seo")]
+        public IActionResult GetSEOPartial(int productId)
+        {
+            if (!HasPermission("Product.Edit")) return HandleAccessDenied();
+
+            // Fetch existing or create new blank object with ProductId
+            var model = _productFacade.GetProductSEO(productId) ?? new ProductSEO { ProductId = productId };
+
+            return PartialView("_ProductSEOPartial", model);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Route("product/save-seo")]
+        public IActionResult SaveSEO(ProductSEO seo)
+        {
+            if (!HasPermission("Product.Edit")) return HandleAccessDenied();
+
+            try
+            {
+                if (seo.Id == 0) seo.CreatedBy = CurrentUserName;
+                seo.UpdatedBy = CurrentUserName;
+
+                _productFacade.SaveProductSEO(seo);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [Route("product/upload-seo-image")]
+        public async Task<IActionResult> UploadSEOImage(int productId, IFormFile file)
+        {
+            if (!HasPermission("Product.Edit")) return HandleAccessDenied();
+
+            if (file == null || file.Length == 0)
+                return Json(new { success = false, message = "No file received" });
+
+            try
+            {
+                // Path: /images/products/{id}/seo/
+                var folderName = Path.Combine("images", "products", productId.ToString(), "seo");
+                var folderPath = Path.Combine(_webHostEnvironment.WebRootPath, folderName);
+
+                if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
+
+                var fileName = $"og_{DateTime.UtcNow.Ticks}{Path.GetExtension(file.FileName)}";
+                var filePath = Path.Combine(folderPath, fileName);
+
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                // Return the relative path so JS can set it in the input field
+                string dbPath = $"/{folderName.Replace("\\", "/")}/{fileName}";
+                return Json(new { success = true, filePath = dbPath });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+#endregion
+
 
     }
 }

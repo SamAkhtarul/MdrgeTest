@@ -5,12 +5,14 @@ using MDUA.Entities.Bases;
 using MDUA.Entities.List;
 using MDUA.Facade.Interface;
 using MDUA.Framework;
+using MDUA.Framework.Exceptions;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.Design;
 using System.Linq;
+using System.Net;
 using System.Text.RegularExpressions;
 using static MDUA.Entities.ProductVariant;
-using System.Net;
 
 namespace MDUA.Facade
 {
@@ -30,7 +32,8 @@ namespace MDUA.Facade
         private readonly IProductVideoDataAccess _productVideoDataAccess;
         private readonly IGlobalSettingDataAccess _globalSettingDataAccess;
         private readonly IProductCategoryDataAccess _productCategoryDataAccess;
-
+        private readonly IAttributeValueDataAccess _attributeValueDataAccess;
+        private readonly IProductSEODataAccess _productSEODataAccess;
         private static readonly List<string> _sizeSortOrder = new List<string>
 
         {
@@ -51,7 +54,9 @@ namespace MDUA.Facade
             ICompanyDataAccess companyDataAccess,
             IGlobalSettingDataAccess globalSettingDataAccess,
             IProductVideoDataAccess productVideoDataAccess,
-            IProductCategoryDataAccess productCategoryDataAccess)
+            IProductCategoryDataAccess productCategoryDataAccess,
+            IAttributeValueDataAccess attributeValueDataAccess,
+            IProductSEODataAccess productSEODataAccess)
         {
             _ProductDataAccess = productDataAccess;
             _ProductImageDataAccess = productImageDataAccess;
@@ -67,12 +72,25 @@ namespace MDUA.Facade
             _globalSettingDataAccess = globalSettingDataAccess;
             _productVideoDataAccess = productVideoDataAccess;
             _productCategoryDataAccess = productCategoryDataAccess;
-
+            _attributeValueDataAccess = attributeValueDataAccess;
+            _productSEODataAccess = productSEODataAccess;
         }
 
         #region Common Implementation
-        public long Delete(int id) => _ProductDataAccess.Delete(id);
+        public long Delete(int id)
+        {
+            var result = _ProductDataAccess.Delete(id);
 
+            if (result == -999)
+                throw new WorkflowException(
+                    "This product cannot be deleted because it is already used in orders. The product has been deactivated instead."
+                );
+
+            if (result == -1)
+                throw new WorkflowException("Product delete failed due to a system error.");
+
+            return result;
+        }
         public Product Get(int id) => _ProductDataAccess.Get(id);
 
         public ProductList GetAll() => _ProductDataAccess.GetAll();
@@ -234,7 +252,19 @@ namespace MDUA.Facade
             {
                 product.CompanyLogoUrl = "/images/logo.jpg";
             }
+            //  10. NEW: Load Favicon (Moved from View to Facade)
+            string dbFavicon = _globalSettingDataAccess.GetValue(product.CompanyId, "FaviconUrl"); // Changed to GetValue assuming IGlobalSettingDataAccess interface
+            if (!string.IsNullOrEmpty(dbFavicon))
+            {
+                product.FaviconUrl = dbFavicon + "?v=" + DateTime.UtcNow.Ticks;
+            }
+            else
+            {
+                product.FaviconUrl = "/favicon.ico";
+            }
 
+            //  11. NEW: Load SEO Data (Moved from View to Facade)
+            product.SEOData = _productSEODataAccess.GetProductSEO(product.Id);
             string dhakaStr = _globalSettingDataAccess.GetValue(product.CompanyId, "DeliveryCharge_Dhaka");
             string outsideStr = _globalSettingDataAccess.GetValue(product.CompanyId, "DeliveryCharge_Outside");
 
@@ -447,33 +477,28 @@ namespace MDUA.Facade
         {
             return _ProductVariantDataAccess.GetVariantAttributesByProductId(productId);
         }
-        public ProductList GetLastFiveProducts()
+        // MDUA.Facade/ProductFacade.cs
+
+        public ProductList GetLastFiveProducts(int companyId) // ✅ Match Interface Signature
         {
-            return _ProductDataAccess.GetLastFiveProducts();
+            return _ProductDataAccess.GetLastFiveProducts(companyId);
         }
 
-        public List<Product> GetAllProductsWithCategory()
+        // Change signature to accept companyId
+        public List<Product> GetAllProductsWithCategory(int companyId)
         {
-            var products = _ProductDataAccess.GetAll(); // returns List<Product> or ProductList
 
-            // Get all categories in one query
-            var categories = _categoryDataAccess.GetAll().ToDictionary(c => c.Id, c => c.Name);
+            var products = _ProductDataAccess.GetAllProductsWithCategory(companyId);
 
-            // Fill CategoryName for each product
+
+
             foreach (var p in products)
             {
-                if (p.CategoryId.HasValue && categories.ContainsKey(p.CategoryId.Value))
-                    p.CategoryName = categories[p.CategoryId.Value];
-                else
-                    p.CategoryName = "N/A";
-
+                // Calculate Discount Logic (Keep your existing logic here)
                 decimal basePrice = p.BasePrice ?? 0;
-
-                // ✅ NEW: Get the Single Best Discount
                 var bestDiscount = GetBestDiscount(p.Id, basePrice);
 
                 decimal sellingPrice = basePrice;
-
                 if (bestDiscount != null)
                 {
                     if (bestDiscount.DiscountType == "Flat")
@@ -481,28 +506,31 @@ namespace MDUA.Facade
                     else if (bestDiscount.DiscountType == "Percentage")
                         sellingPrice -= (basePrice * (bestDiscount.DiscountValue / 100));
                 }
-
                 p.SellingPrice = Math.Max(sellingPrice, 0);
-                p.ActiveDiscount = bestDiscount; // The View will show this specific discount
+                p.ActiveDiscount = bestDiscount;
             }
 
             return products.ToList();
         }
+        // MDUA.Facade/ProductFacade.cs
 
-        public UserLoginResult GetAddProductData(int userId)
+        public UserLoginResult GetAddProductData(int companyId)
         {
             var result = new UserLoginResult
             {
-                Categories = _categoryDataAccess.GetAll()?.ToList() ?? new List<ProductCategory>(),
-                Attributes = _attributeNameDataAccess.GetAll()?.ToList() ?? new List<AttributeName>()
+                //  Use 'GetAvailableCategories' to hide Inactive items
+                // and handle Global vs Private logic 
+                Categories = _categoryDataAccess.GetAvailableCategories(companyId)?.ToList() ?? new List<ProductCategory>(),
+
+                // Attributes logic remains the same 
+                Attributes = _attributeNameDataAccess.GetAvailableAttributes(companyId)?.ToList() ?? new List<AttributeName>()
             };
 
             return result;
         }
-
         public List<AttributeValue> GetAttributeValues(int attributeId)
         {
-            return _attributeNameDataAccess.GetValuesByAttributeId(attributeId);
+            return _attributeValueDataAccess.GetActiveValues(attributeId);
         }
 
         public ProductVariantList GetVariantsByProductId(int productId)
@@ -526,13 +554,11 @@ namespace MDUA.Facade
             }
 
             // 2. Get its variants
-            // We use GetProductVariantsByProductId, which you also have.
             product.Variants = _ProductVariantDataAccess.GetProductVariantsByProductId(productId).ToList();
 
             // 3. Get its category name
             if (product.CategoryId.HasValue)
             {
-                // Assuming _categoryDataAccess.Get(id) exists
                 var category = _categoryDataAccess.Get(product.CategoryId.Value);
                 product.CategoryName = category?.Name ?? "N/A";
             }
@@ -613,16 +639,19 @@ namespace MDUA.Facade
         {
             var result = new ProductVariantResult();
             result.ProductId = productId;
+
+            // 1. Get Product & Base Price
             var product = _ProductDataAccess.Get(productId);
             decimal basePrice = product?.BasePrice ?? 0;
             result.BasePrice = basePrice;
-
+            int companyId = product?.CompanyId ?? 0;
+            // 2. Get Variants
             var variantList = _ProductVariantDataAccess.GetProductVariantsByProductId(productId);
             result.Variants = new List<ProductVariant>(variantList);
 
+            // 3. Calculate Discounts (Your existing logic)
             var bestDiscount = GetBestDiscount(productId, basePrice);
 
-            // Apply to variants
             foreach (var v in result.Variants)
             {
                 decimal vPrice = v.VariantPrice ?? 0;
@@ -637,13 +666,50 @@ namespace MDUA.Facade
                 }
 
                 v.DiscountedPrice = vSellingPrice < 0 ? 0 : vSellingPrice;
-            }       // MUST USE GetAll() to fetch attributes for the dropdown list
-            result.AvailableAttributes = _attributeNameDataAccess.GetAll()?.ToList()
-                                                 ?? new List<AttributeName>();
-            result.ReorderLevel = product?.ReorderLevel ?? 0;
+            }
+
+            // 4. Get All Available Attributes (For the dropdowns)
+            result.AvailableAttributes = _attributeNameDataAccess.GetAvailableAttributes(companyId)?.ToList()
+                                                ?? new List<AttributeName>(); result.ReorderLevel = product?.ReorderLevel ?? 0;
+
+            // 5. Get Specific Attributes (Headers) - Sorted by DisplayOrder
+            // Note: Uses the "Safe" method we created to avoid the 500 error
+            result.Attributes = _attributeNameDataAccess.GetAttributeNamesByProductId(productId);
+
+            // ==============================================================================
+            // ✅ 6. CRITICAL ADDITION: Populate AttributeValueIds for Smart Sync
+            // ==============================================================================
+            // We fetch the raw values (Red, Small, etc.) to map them to the variants.
+            // Without this, the Controller sees empty IDs and cannot sync images.
+            var allValues = _ProductVariantDataAccess.GetVariantAttributesByProductId(productId);
+
+            foreach (var v in result.Variants)
+            {
+                v.AttributeValueIds = new List<int>();
+
+                // We iterate through the Headers (result.Attributes) to ensure strict alignment.
+                // Index 0 in AttributeValueIds MUST match Index 0 in Attributes (The Primary Attribute).
+                foreach (var headerAttribute in result.Attributes)
+                {
+                    var match = allValues.FirstOrDefault(x => x.VariantId == v.Id && x.AttributeId == headerAttribute.Id);
+
+                    if (match != null)
+                    {
+                        v.AttributeValueIds.Add(match.AttributeValueId);
+                    }
+                    else
+                    {
+                        // Fallback to maintain index alignment if a value is missing
+                        v.AttributeValueIds.Add(0);
+                    }
+                }
+            }
+
             return result;
         }
-
+        
+        
+        
         public List<AttributeName> GetMissingAttributesForVariant(int productId, int variantId)
         {
             return _attributeNameDataAccess.GetMissingAttributesForVariant(productId, variantId);
@@ -889,17 +955,14 @@ namespace MDUA.Facade
             }
         }
 
-        public ProductList SearchProducts(string searchTerm)
+        public ProductList SearchProducts(string searchTerm, int companyId)
         {
-            if (string.IsNullOrWhiteSpace(searchTerm))
-            {
-                return new ProductList();
-            }
+            if (string.IsNullOrWhiteSpace(searchTerm)) return new ProductList();
 
-            // 1. Get matching products from Database
-            var products = _ProductDataAccess.SearchProducts(searchTerm);
+            // ✅ Pass companyId to Data Access
+            var products = _ProductDataAccess.SearchProducts(searchTerm, companyId);
 
-            // 2. Filter Variants inside the results
+            // Keep your existing variant filtering logic...
             foreach (var product in products)
             {
                 if (product.IsVariantBased == true)
@@ -930,6 +993,7 @@ namespace MDUA.Facade
 
             return products;
         }
+
 
 
         #endregion
@@ -1126,9 +1190,9 @@ namespace MDUA.Facade
                 }
             }
         }
-        public List<LowStockItem> GetLowStockVariants(int topN)
+        public List<LowStockItem> GetLowStockVariants(int companyId, int topN)
         {
-            return _variantPriceStockDataAccess.GetLowStockVariants(topN);
+            return _variantPriceStockDataAccess.GetLowStockVariants(companyId, topN);
         }
 
         public LandingPageViewModel GetHomepageData()
@@ -1154,7 +1218,8 @@ namespace MDUA.Facade
                     // Logic to get primary image or default
                     ImageUrl = _ProductImageDataAccess.GetPrimaryImage(p.Id) ?? "/images/default-book.png",
                     // Logic to get base price or lowest variant price
-                    Price = p.BasePrice ?? 0
+                    Price = p.BasePrice ?? 0,
+                    Slug = p.Slug // <--- Add this line
                 };
                 model.NewArrivals.Add(vm);
             }
@@ -1163,6 +1228,115 @@ namespace MDUA.Facade
             model.FeaturedProducts = model.NewArrivals.OrderBy(x => Guid.NewGuid()).ToList();
 
             return model;
+        }
+
+
+        public List<ProductViewModel> GetShopData(int companyId, int? categoryId = null, string searchTerm = null)
+        {
+            List<Product> sourceList;
+
+            // 1. Determine Source (Search vs All)
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                // ✅ FIX: Pass companyId directly to the method.
+                // The SQL will filter by company, so we remove the .Where() clause here.
+                sourceList = SearchProducts(searchTerm, companyId);
+
+                // ⚠️ Price/Discount Calculation (Kept exactly the same)
+                foreach (var p in sourceList)
+                {
+                    decimal basePrice = p.BasePrice ?? 0;
+                    var bestDiscount = GetBestDiscount(p.Id, basePrice);
+                    decimal sellingPrice = basePrice;
+
+                    if (bestDiscount != null)
+                    {
+                        if (bestDiscount.DiscountType == "Flat")
+                            sellingPrice -= bestDiscount.DiscountValue;
+                        else if (bestDiscount.DiscountType == "Percentage")
+                            sellingPrice -= (basePrice * (bestDiscount.DiscountValue / 100));
+                    }
+                    p.SellingPrice = Math.Max(sellingPrice, 0);
+                }
+            }
+            else
+            {
+                // ✅ FIX: Pass companyId directly to the method.
+                // This is much faster because the DB only returns this company's products.
+                sourceList = GetAllProductsWithCategory(companyId);
+            }
+
+            // 2. Filter by Category (In-memory filtering is okay here since the list is already small/scoped to company)
+            if (categoryId.HasValue)
+            {
+                sourceList = sourceList.Where(p => p.CategoryId == categoryId.Value).ToList();
+            }
+
+            // 3. Map to ViewModel (Kept exactly the same)
+            var list = new List<ProductViewModel>();
+            foreach (var p in sourceList)
+            {
+                string imgUrl = _ProductImageDataAccess.GetPrimaryImage(p.Id);
+
+                list.Add(new ProductViewModel
+                {
+                    Id = p.Id,
+                    Name = p.ProductName,
+                    ImageUrl = !string.IsNullOrEmpty(imgUrl) ? imgUrl : "/images/default-book.png",
+                    Price = p.SellingPrice > 0 ? p.SellingPrice : (p.BasePrice ?? 0),
+                    Slug = p.Slug
+                });
+            }
+
+            return list;
+        }
+        public ProductVariant GetVariant(int variantId)
+        {
+            return _ProductVariantDataAccess.GetWithStock(variantId);
+        }
+
+        // =========================================================
+        // ✅ NEW: SEO MANAGEMENT REGION
+        // =========================================================
+
+        public ProductSEO GetProductSEO(int productId)
+        {
+            return _productSEODataAccess.GetProductSEO(productId);
+        }
+
+        public void SaveProductSEO(ProductSEO seo)
+        {
+            if (seo == null) throw new ArgumentNullException(nameof(seo));
+
+            // 1. Check if a record already exists for this Product
+            var existingSEO = _productSEODataAccess.GetProductSEO(seo.ProductId);
+
+            if (existingSEO != null)
+            {
+                // UPDATE Logic
+
+                // Preserve the ID of the existing record so UPDATE works
+                seo.Id = existingSEO.Id;
+
+                // Preserve original creation metadata if not passed
+                if (string.IsNullOrEmpty(seo.CreatedBy)) seo.CreatedBy = existingSEO.CreatedBy;
+                if (seo.CreatedAt == DateTime.MinValue) seo.CreatedAt = existingSEO.CreatedAt;
+
+                // Update timestamps
+                seo.UpdatedAt = DateTime.UtcNow;
+
+                _productSEODataAccess.Update(seo);
+            }
+            else
+            {
+                // INSERT Logic
+                seo.CreatedAt = DateTime.UtcNow;
+                seo.UpdatedAt = DateTime.UtcNow;
+
+                // Note: CreatedBy should be populated by the Controller
+
+                _productSEODataAccess.Insert(seo);
+            }
         }
     }
 }

@@ -3,18 +3,13 @@
 
     // Used to refresh the modal after an action (Receive/Reject)
     let currentOpenedOrderId = null;
-
-    // =========================================================
-    // 1. MODAL LOGIC (Z-Index Fix & Data Fetching)
-    // =========================================================
-
     let detailsModalInstance = null;
 
-    // Event Delegation: Listen for clicks on the body
+    // =========================================================
+    // 1. OPEN MODAL LOGIC
+    // =========================================================
     document.body.addEventListener('click', function (e) {
-        // Check if the clicked element has the class 'js-btn-details'
         const btn = e.target.closest('.js-btn-details');
-
         if (btn) {
             e.preventDefault();
             const orderId = btn.getAttribute('data-order-id');
@@ -24,43 +19,31 @@
 
     function openDetailsModal(id) {
         console.log(`🔍 Opening details for Order ID: ${id}`);
-
-        // Save ID for refreshing later
         currentOpenedOrderId = id;
 
         const modalEl = document.getElementById('detailsModal');
         const modalBody = document.getElementById('modalContentPlaceholder');
 
-        if (!modalEl || !modalBody) {
-            console.error("❌ Modal elements not found!");
-            return;
-        }
+        if (!modalEl || !modalBody) return;
 
+        // Ensure Modal is in Body (Z-Index fix)
         if (modalEl.parentElement !== document.body) {
             document.body.appendChild(modalEl);
         }
 
-        if (detailsModalInstance) {
-            detailsModalInstance.dispose();
-            detailsModalInstance = null;
+        if (!detailsModalInstance) {
+            detailsModalInstance = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
         }
 
-        detailsModalInstance = new bootstrap.Modal(modalEl, {
-            backdrop: 'static',
-            keyboard: false
-        });
-
-        // Set Loading UI
+        // Loading State
         modalBody.innerHTML = `
             <div class="d-flex flex-column align-items-center justify-content-center py-5">
                 <div class="spinner-border text-primary" role="status"></div>
                 <span class="mt-2 text-muted">Loading details...</span>
             </div>`;
 
-        // Show Modal
         detailsModalInstance.show();
 
-        // AJAX Fetch
         fetch(`/Purchase/GetBulkOrderDetails?id=${id}`)
             .then(res => {
                 if (!res.ok) throw new Error("Network response was not ok");
@@ -75,165 +58,218 @@
             });
     }
 
-    // Cleanup backdrops on page reload/navigation
-    window.addEventListener('beforeunload', function () {
-        const backdrops = document.querySelectorAll('.modal-backdrop');
-        backdrops.forEach(b => b.remove());
+    // =========================================================
+    // 2. BULK RECEIVE ACTIONS (Inside Modal)
+    // =========================================================
+
+    // A. Show Bulk Form (Receive All)
+    document.body.addEventListener('click', function (e) {
+        if (e.target.closest('#btnShowReceiveAll')) {
+            e.preventDefault();
+            const listContainer = document.getElementById('originalListContainer');
+            const bulkHeader = document.getElementById('bulkActionsHeader');
+            const bulkForm = document.getElementById('bulkReceiveContainer');
+
+            if (listContainer && bulkForm) {
+                listContainer.classList.add('d-none');
+                if (bulkHeader) bulkHeader.classList.add('d-none');
+                bulkForm.classList.remove('d-none');
+                recalcBulkTotals();
+            }
+        }
     });
 
-    // =========================================================
-    // 2. FORM SUBMISSION & CHECKBOX LOGIC (Existing Code)
-    // =========================================================
+    // B. Cancel Bulk Form
+    document.body.addEventListener('click', function (e) {
+        if (e.target.id === 'btnCancelBulk') {
+            e.preventDefault();
+            document.getElementById('bulkReceiveContainer').classList.add('d-none');
+            document.getElementById('originalListContainer').classList.remove('d-none');
+            const header = document.getElementById('bulkActionsHeader');
+            if (header) header.classList.remove('d-none');
+        }
+    });
 
-    const form = document.getElementById('bulkOrderForm');
+    // C. Live Totals Calculation
+    document.body.addEventListener('input', function (e) {
+        if (e.target.matches('.bulk-qty, .bulk-price')) {
+            recalcBulkTotals();
+        }
+    });
 
-    if (form) {
-        form.addEventListener('submit', function (e) {
-            console.log("--- FORM SUBMISSION STARTED ---");
-            const checkedVariants = document.querySelectorAll('.variant-checkbox:checked');
-
-            if (checkedVariants.length === 0) {
-                alert("Please select at least one item.");
-                e.preventDefault();
-            }
+    function recalcBulkTotals() {
+        let total = 0;
+        document.querySelectorAll('.bulk-item-row').forEach(row => {
+            const qty = parseFloat(row.querySelector('.bulk-qty').value) || 0;
+            const price = parseFloat(row.querySelector('.bulk-price').value) || 0;
+            const rowTotal = qty * price;
+            row.querySelector('.bulk-row-total').innerText = rowTotal.toFixed(2);
+            total += rowTotal;
         });
+        const display = document.getElementById('bulkTotalDisplay');
+        if (display) display.innerText = total.toFixed(2);
     }
 
-    // Parent Checkbox (Select All)
-    const prodCheckboxes = document.querySelectorAll('.product-checkbox');
-    prodCheckboxes.forEach(parentCb => {
-        parentCb.addEventListener('change', function () {
-            const parentId = this.id;
-            const children = document.querySelectorAll(`.variant-checkbox[data-parent="${parentId}"]`);
-            children.forEach(child => {
-                child.checked = this.checked;
+    // D. Submit Bulk Receive (Receive All)
+    document.body.addEventListener('submit', function (e) {
+        if (e.target.id === 'bulkReceiveForm') {
+            e.preventDefault();
+
+            const invoice = document.getElementById('bulkInvoice').value;
+            const vendorIdVal = document.getElementById('bulkVendorId').value;
+
+            if (!invoice) { alert("Invoice Number is required"); return; }
+            if (!vendorIdVal || vendorIdVal == "0") { alert("Vendor ID missing."); return; }
+
+            const items = [];
+            let grandTotal = 0;
+
+            document.querySelectorAll('.bulk-item-row').forEach(row => {
+                const qty = parseFloat(row.querySelector('.bulk-qty').value) || 0;
+                const price = parseFloat(row.querySelector('.bulk-price').value) || 0;
+
+                if (qty > 0) {
+                    items.push({
+                        PoRequestId: parseInt(row.getAttribute('data-poid')),
+                        ProductVariantId: parseInt(row.getAttribute('data-variantid')),
+                        Quantity: qty,
+                        Price: price
+                    });
+                    grandTotal += (qty * price);
+                }
             });
-        });
+
+            if (items.length === 0) { alert("No items selected."); return; }
+
+            const payload = {
+                InvoiceNo: invoice,
+                Remarks: document.getElementById('bulkRemarks').value,
+                PaymentMethodId: document.getElementById('bulkPaymentMethod').value ? parseInt(document.getElementById('bulkPaymentMethod').value) : null,
+                TotalPaid: grandTotal,
+                VendorId: parseInt(vendorIdVal),
+                Items: items
+            };
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            const oldText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = "Processing...";
+
+            fetch('/purchase/receive-bulk-stock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        if (currentOpenedOrderId) openDetailsModal(currentOpenedOrderId);
+                    } else {
+                        alert(data.message);
+                        btn.disabled = false;
+                        btn.innerText = oldText;
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Server Error");
+                    btn.disabled = false;
+                    btn.innerText = oldText;
+                });
+        }
     });
 
-    // Child Checkbox Logic
-    const variantCheckboxes = document.querySelectorAll('.variant-checkbox');
-    variantCheckboxes.forEach(childCb => {
-        childCb.addEventListener('change', function () {
-            const parentId = this.dataset.parent;
-            const parentCb = document.getElementById(parentId);
-            const siblings = document.querySelectorAll(`.variant-checkbox[data-parent="${parentId}"]`);
+    // E. Reject All Remaining
+    document.body.addEventListener('click', function (e) {
+        if (e.target.closest('#btnRejectAll')) {
+            e.preventDefault();
+            if (!confirm("Are you sure you want to REJECT ALL remaining items?")) return;
+            if (!currentOpenedOrderId) return;
 
-            const allChecked = Array.from(siblings).every(cb => cb.checked);
-            const someChecked = Array.from(siblings).some(cb => cb.checked);
+            const btn = e.target.closest('#btnRejectAll');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
-            parentCb.checked = allChecked;
-            parentCb.indeterminate = someChecked && !allChecked;
-        });
+            fetch('/purchase/reject-bulk-remaining', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ BulkOrderId: parseInt(currentOpenedOrderId) })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        openDetailsModal(currentOpenedOrderId);
+                    } else {
+                        alert(data.message);
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-x-circle"></i> Reject Remaining';
+                    }
+                });
+        }
     });
 
     // =========================================================
-    // 3. IN-MODAL RECEIVE / REJECT LOGIC (New Features)
+    // 3. INDIVIDUAL ITEM ACTIONS (Receive/Reject Single)
     // =========================================================
 
-    // A. Toggle "Receive" Form Visibility
+    // A. Show Single Receive Row
     document.body.addEventListener('click', function (e) {
         const btn = e.target.closest('.js-btn-receive-toggle');
         if (btn) {
             e.preventDefault();
-            const targetId = btn.getAttribute('data-target'); // e.g., "form-102"
+            const targetId = btn.getAttribute('data-target');
             const formRow = document.getElementById(targetId);
-            const btnGroup = btn.parentElement; // The div holding the buttons
+            const btnGroup = btn.parentElement;
 
             if (formRow) {
-                formRow.classList.remove('d-none'); // Show input row
-                btnGroup.classList.add('d-none');   // Hide action buttons temporarily
+                formRow.classList.remove('d-none');
+                btnGroup.classList.add('d-none');
             }
         }
     });
 
-    // B. Cancel Receive Action
-    // =========================================================
-    // B. Cancel Receive Action (Fix)
-    // =========================================================
+    // B. Cancel Single Receive
     document.body.addEventListener('click', function (e) {
-        // Look for the class 'js-btn-cancel-receive'
         const btn = e.target.closest('.js-btn-cancel-receive');
-
         if (btn) {
             e.preventDefault();
-            console.log("Cancel button clicked");
-
-            // 1. Get the target ID (e.g., "form-105")
             const targetId = btn.getAttribute('data-target');
-
-            // 2. Find the Form Row (The row to hide)
             const formRow = document.getElementById(targetId);
-
-            // 3. Find the Button Group (The buttons to show again)
-            // Extract ID: "form-105" -> "105"
             const poId = targetId.split('-')[1];
             const btnGroup = document.getElementById(`btn-group-${poId}`);
 
-            // 4. Toggle Classes
-            if (formRow) {
-                formRow.classList.add('d-none'); // Hide the input row
-            } else {
-                console.error("Form row not found:", targetId);
-            }
-
-            if (btnGroup) {
-                btnGroup.classList.remove('d-none'); // Show the original buttons
-            } else {
-                console.error("Button group not found: btn-group-" + poId);
-            }
+            if (formRow) formRow.classList.add('d-none');
+            if (btnGroup) btnGroup.classList.remove('d-none');
         }
     });
-    // C. Confirm Receive (AJAX POST)
+
+    // C. Confirm Single Receive
     document.body.addEventListener('click', function (e) {
         const btn = e.target.closest('.js-btn-confirm-receive');
         if (btn) {
             e.preventDefault();
-
-            // 1. Gather Data from the row
             const row = btn.closest('tr');
-            const variantId = parseInt(btn.getAttribute('data-variantid'));
-            const poId = parseInt(btn.getAttribute('data-poid'));
-            const maxQty = parseInt(btn.getAttribute('data-max-qty'));
 
-            // ✅ CHANGED: Get quantity from the new input field
-            const qtyInput = row.querySelector('.js-input-qty');
-            const qtyVal = parseInt(qtyInput.value);
-
-            const priceVal = row.querySelector('.js-input-price').value;
+            const qtyVal = parseInt(row.querySelector('.js-input-qty').value);
+            const priceVal = parseFloat(row.querySelector('.js-input-price').value);
             const invoice = row.querySelector('.js-input-invoice').value;
             const remarks = row.querySelector('.js-input-remarks').value;
 
-            // 2. Validate
-            if (!qtyVal || qtyVal <= 0) {
-                alert("Please enter a valid Quantity.");
-                return;
-            }
-
-            if (qtyVal > maxQty) {
-                alert(`You cannot receive more than the ordered quantity (${maxQty}).`);
-                return;
-            }
-
-            if (!priceVal || parseFloat(priceVal) < 0) {
-                alert("Please enter a valid Buying Price.");
-                return;
-            }
+            if (!qtyVal || qtyVal <= 0) { alert("Invalid Quantity"); return; }
+            if (isNaN(priceVal) || priceVal < 0) { alert("Invalid Price"); return; }
 
             const payload = {
-                ProductVariantId: variantId,
-                Quantity: qtyVal, // Send the user-input quantity
-                BuyingPrice: parseFloat(priceVal),
+                ProductVariantId: parseInt(btn.getAttribute('data-variantid')),
+                Quantity: qtyVal,
+                BuyingPrice: priceVal,
                 InvoiceNo: invoice,
                 Remarks: remarks
             };
 
-            // 3. UI Feedback
-            const originalText = btn.innerText;
+            const oldText = btn.innerText;
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
-            // 4. Send Request
             fetch('/purchase/receive-stock', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -242,38 +278,31 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        if (currentOpenedOrderId) {
-                            openDetailsModal(currentOpenedOrderId);
-                        }
+                        if (currentOpenedOrderId) openDetailsModal(currentOpenedOrderId);
                     } else {
                         alert(data.message);
                         btn.disabled = false;
-                        btn.innerText = originalText;
+                        btn.innerText = oldText;
                     }
                 })
                 .catch(err => {
                     console.error(err);
-                    alert("An error occurred while connecting to the server.");
+                    alert("Server Error");
                     btn.disabled = false;
-                    btn.innerText = originalText;
+                    btn.innerText = oldText;
                 });
         }
     });
-    // D. Reject Item Logic
+
+    // D. Reject Single Item
     document.body.addEventListener('click', function (e) {
         const btn = e.target.closest('.js-btn-reject');
         if (btn) {
             e.preventDefault();
-
-            if (!confirm("Are you sure you want to REJECT this item? This cannot be undone.")) {
-                return;
-            }
+            if (!confirm("Reject this item?")) return;
 
             const poId = parseInt(btn.getAttribute('data-poid'));
-            const originalHtml = btn.innerHTML;
-
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
             fetch('/purchase/reject-item', {
                 method: 'POST',
@@ -283,23 +312,12 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        // Success: Refresh the modal content
-                        if (currentOpenedOrderId) {
-                            openDetailsModal(currentOpenedOrderId);
-                        }
+                        if (currentOpenedOrderId) openDetailsModal(currentOpenedOrderId);
                     } else {
                         alert(data.message);
                         btn.disabled = false;
-                        btn.innerHTML = originalHtml;
                     }
-                })
-                .catch(err => {
-                    console.error(err);
-                    alert("Error rejecting item.");
-                    btn.disabled = false;
-                    btn.innerHTML = originalHtml;
                 });
         }
     });
-
 });

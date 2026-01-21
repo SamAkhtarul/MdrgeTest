@@ -140,40 +140,49 @@ namespace MDUA.DataAccess
             return delivery.Id;
         }
 
-        public System.Collections.Generic.IList<Delivery> LoadAllWithDetails()
+        public System.Collections.Generic.IList<Delivery> LoadAllWithDetails(int companyId)
         {
             var result = new System.Collections.Generic.List<Delivery>();
 
-            // SQL to fetch Delivery + Order Info + Customer + Items + Product Info
             string sql = @"
-        SELECT 
-            d.Id, d.SalesOrderId, d.TrackingNumber, d.Status, d.CarrierName, 
-            d.ShipDate, d.EstimatedArrival, d.ActualDeliveryDate, d.ShippingCost,
-            
-            soh.Id AS OrderId, 
-            soh.SalesChannelId,
-            soh.Status AS OrderStatus,      -- ✅ ADDED: Fetch Order Status
-            soh.Confirmed AS OrderConfirmed, -- ✅ ADDED: Fetch Confirmed Bit
-            
-            c.CustomerName,
-            
-            di.Id AS ItemId, di.Quantity,
-            
-            p.ProductName, 
-            pv.VariantName, 
-            pv.Sku
-        FROM Delivery d
-        INNER JOIN SalesOrderHeader soh ON d.SalesOrderId = soh.Id
-        INNER JOIN CompanyCustomer cc ON soh.CompanyCustomerId = cc.Id
-        INNER JOIN Customer c ON cc.CustomerId = c.Id
-        LEFT JOIN DeliveryItem di ON d.Id = di.DeliveryId
-        LEFT JOIN SalesOrderDetail sod ON di.SalesOrderDetailId = sod.Id
-        LEFT JOIN ProductVariant pv ON sod.ProductId = pv.Id 
-        LEFT JOIN Product p ON pv.ProductId = p.Id
-        ORDER BY d.Id DESC";
+    SELECT 
+        d.Id, d.SalesOrderId, d.TrackingNumber, d.Status, 
+        carr.CarrierName, -- ✅ FETCH FROM JOINED TABLE
+        d.ShipDate, d.EstimatedArrival, d.ActualDeliveryDate, d.ShippingCost,
+        
+        soh.Id AS OrderId, 
+        soh.SalesChannelId,
+        soh.Status AS OrderStatus,      
+        soh.Confirmed AS OrderConfirmed, 
+        
+        c.CustomerName,
+        
+        di.Id AS ItemId, di.Quantity,
+        
+        p.ProductName, 
+        pv.VariantName, 
+        pv.Sku
+    FROM Delivery d
+    INNER JOIN SalesOrderHeader soh ON d.SalesOrderId = soh.Id
+    INNER JOIN CompanyCustomer cc ON soh.CompanyCustomerId = cc.Id
+    INNER JOIN Customer c ON cc.CustomerId = c.Id -- (Alias 'c' is Customer)
+    
+    -- ✅ NEW JOINS FOR CARRIER
+    LEFT JOIN CompanyCarrier compCarr ON d.CarrierId = compCarr.Id
+    LEFT JOIN Carrier carr ON compCarr.CarrierId = carr.Id
+
+    LEFT JOIN DeliveryItem di ON d.Id = di.DeliveryId
+    LEFT JOIN SalesOrderDetail sod ON di.SalesOrderDetailId = sod.Id
+    LEFT JOIN ProductVariant pv ON sod.ProductId = pv.Id 
+    LEFT JOIN Product p ON pv.ProductId = p.Id
+    WHERE cc.CompanyId = @CompanyId
+    ORDER BY d.Id DESC";
 
             using (SqlCommand cmd = GetSQLCommand(sql))
             {
+                // ✅ Add the Security Parameter
+                AddParameter(cmd, pInt32("CompanyId", companyId));
+
                 cmd.CommandType = CommandType.Text;
 
                 if (cmd.Connection.State != ConnectionState.Open)
@@ -192,10 +201,10 @@ namespace MDUA.DataAccess
                             delivery = new Delivery
                             {
                                 Id = deliveryId,
-                                SalesOrderId = reader.GetInt32(reader.GetOrdinal("SalesOrderId")), // Added this missing map
+                                SalesOrderId = reader.GetInt32(reader.GetOrdinal("SalesOrderId")),
                                 TrackingNumber = reader.IsDBNull(reader.GetOrdinal("TrackingNumber")) ? null : reader.GetString(reader.GetOrdinal("TrackingNumber")),
                                 Status = reader.IsDBNull(reader.GetOrdinal("Status")) ? "Pending" : reader.GetString(reader.GetOrdinal("Status")),
-                                CarrierName = reader.IsDBNull(reader.GetOrdinal("CarrierName")) ? null : reader.GetString(reader.GetOrdinal("CarrierName")),
+                              //  CarrierName = reader.IsDBNull(reader.GetOrdinal("CarrierName")) ? null : reader.GetString(reader.GetOrdinal("CarrierName")),
                                 ShipDate = reader.IsDBNull(reader.GetOrdinal("ShipDate")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("ShipDate")),
                                 EstimatedArrival = reader.IsDBNull(reader.GetOrdinal("EstimatedArrival")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("EstimatedArrival")),
                                 ActualDeliveryDate = reader.IsDBNull(reader.GetOrdinal("ActualDeliveryDate")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("ActualDeliveryDate")),
@@ -206,8 +215,6 @@ namespace MDUA.DataAccess
                                 SalesOrderHeader = new SalesOrderHeader
                                 {
                                     Id = reader.GetInt32(reader.GetOrdinal("OrderId")),
-
-                                    // ✅ MAPPING FIX: Map the new columns
                                     Status = reader.IsDBNull(reader.GetOrdinal("OrderStatus")) ? "" : reader.GetString(reader.GetOrdinal("OrderStatus")),
                                     Confirmed = !reader.IsDBNull(reader.GetOrdinal("OrderConfirmed")) && reader.GetBoolean(reader.GetOrdinal("OrderConfirmed")),
 
@@ -258,52 +265,81 @@ namespace MDUA.DataAccess
             return result;
         }
 
-
         #endregion
 
         #region Private Helpers
 
         private void AddExtendedParams(SqlCommand cmd, Delivery obj)
         {
-            // Use explicit SqlDbType to handle DBNull correctly
+            // 1. Standard Fields
             cmd.Parameters.Add(new SqlParameter("@SalesOrderId", SqlDbType.Int) { Value = obj.SalesOrderId });
-
             cmd.Parameters.Add(new SqlParameter("@TrackingNumber", SqlDbType.NVarChar, 100) { Value = (object)obj.TrackingNumber ?? DBNull.Value });
             cmd.Parameters.Add(new SqlParameter("@Status", SqlDbType.NVarChar, 50) { Value = (object)obj.Status ?? "Pending" });
-            cmd.Parameters.Add(new SqlParameter("@CarrierName", SqlDbType.NVarChar, 100) { Value = (object)obj.CarrierName ?? DBNull.Value });
+
+            // ❌ REMOVED: @CarrierName (It is no longer in the SP)
+            // cmd.Parameters.Add(new SqlParameter("@CarrierName", ...)); 
+
+            // ✅ ADDED: New Foreign Key and Data Columns
+            cmd.Parameters.Add(new SqlParameter("@CarrierId", SqlDbType.Int) { Value = (object)obj.CarrierId ?? DBNull.Value });
+            cmd.Parameters.Add(new SqlParameter("@CarrierCharge", SqlDbType.Decimal) { Value = (object)obj.CarrierCharge ?? DBNull.Value });
+            cmd.Parameters.Add(new SqlParameter("@PackageWeightGrams", SqlDbType.Int) { Value = (object)obj.PackageWeightGrams ?? DBNull.Value });
+            cmd.Parameters.Add(new SqlParameter("@ConsignmentId", SqlDbType.NVarChar, 100) { Value = (object)obj.ConsignmentId ?? DBNull.Value });
+            cmd.Parameters.Add(new SqlParameter("@CarrierResponse", SqlDbType.NVarChar, -1) { Value = (object)obj.CarrierResponse ?? DBNull.Value }); // -1 for MAX
 
             // Dates
             cmd.Parameters.Add(new SqlParameter("@ShipDate", SqlDbType.DateTime) { Value = obj.ShipDate.HasValue ? (object)obj.ShipDate.Value : DBNull.Value });
             cmd.Parameters.Add(new SqlParameter("@EstimatedArrival", SqlDbType.DateTime) { Value = obj.EstimatedArrival.HasValue ? (object)obj.EstimatedArrival.Value : DBNull.Value });
             cmd.Parameters.Add(new SqlParameter("@ActualDeliveryDate", SqlDbType.DateTime) { Value = obj.ActualDeliveryDate.HasValue ? (object)obj.ActualDeliveryDate.Value : DBNull.Value });
 
-            // Cost
+            // Customer Shipping Cost (Revenue)
             cmd.Parameters.Add(new SqlParameter("@ShippingCost", SqlDbType.Decimal) { Value = obj.ShippingCost.HasValue ? (object)obj.ShippingCost.Value : DBNull.Value });
 
-            // Audit
+            // Audit Fields
             cmd.Parameters.Add(new SqlParameter("@CreatedBy", SqlDbType.NVarChar, 100) { Value = (object)obj.CreatedBy ?? DBNull.Value });
             cmd.Parameters.Add(new SqlParameter("@CreatedAt", SqlDbType.DateTime) { Value = obj.CreatedAt == DateTime.MinValue ? DateTime.UtcNow : obj.CreatedAt });
             cmd.Parameters.Add(new SqlParameter("@UpdatedBy", SqlDbType.NVarChar, 100) { Value = (object)obj.UpdatedBy ?? DBNull.Value });
             cmd.Parameters.Add(new SqlParameter("@UpdatedAt", SqlDbType.DateTime) { Value = obj.UpdatedAt.HasValue ? (object)obj.UpdatedAt.Value : DBNull.Value });
         }
-
         private Delivery FillObjectExtended(SqlDataReader reader)
         {
             Delivery obj = new Delivery();
 
-            // ✅ SAFE MAPPING: Uses Column Name (GetOrdinal), NOT Index
             obj.Id = reader.GetInt32(reader.GetOrdinal("Id"));
             obj.SalesOrderId = reader.GetInt32(reader.GetOrdinal("SalesOrderId"));
 
+            // 1. Map Existing Strings
             int idxTracking = reader.GetOrdinal("TrackingNumber");
             if (!reader.IsDBNull(idxTracking)) obj.TrackingNumber = reader.GetString(idxTracking);
 
             int idxStatus = reader.GetOrdinal("Status");
             if (!reader.IsDBNull(idxStatus)) obj.Status = reader.GetString(idxStatus);
 
-            int idxCarrier = reader.GetOrdinal("CarrierName");
-            if (!reader.IsDBNull(idxCarrier)) obj.CarrierName = reader.GetString(idxCarrier);
+            // 2. Map Carrier Name (Coming from the JOIN in your SP)
+            // Note: Use a try/catch or check column existence if you use this method for other queries that don't join
+            try
+            {
+                int idxCarrier = reader.GetOrdinal("CarrierName");
+                if (!reader.IsDBNull(idxCarrier)) obj.CarrierName = reader.GetString(idxCarrier);
+            }
+            catch { /* Column might not exist in simple queries */ }
 
+            // 3. ✅ Map NEW Columns
+            int idxCarrierId = reader.GetOrdinal("CarrierId");
+            if (!reader.IsDBNull(idxCarrierId)) obj.CarrierId = reader.GetInt32(idxCarrierId);
+
+            int idxCarrierCharge = reader.GetOrdinal("CarrierCharge");
+            if (!reader.IsDBNull(idxCarrierCharge)) obj.CarrierCharge = reader.GetDecimal(idxCarrierCharge);
+
+            int idxWeight = reader.GetOrdinal("PackageWeightGrams");
+            if (!reader.IsDBNull(idxWeight)) obj.PackageWeightGrams = reader.GetInt32(idxWeight);
+
+            int idxConsignment = reader.GetOrdinal("ConsignmentId");
+            if (!reader.IsDBNull(idxConsignment)) obj.ConsignmentId = reader.GetString(idxConsignment);
+
+            int idxResponse = reader.GetOrdinal("CarrierResponse");
+            if (!reader.IsDBNull(idxResponse)) obj.CarrierResponse = reader.GetString(idxResponse);
+
+            // 4. Map Dates
             int idxShipDate = reader.GetOrdinal("ShipDate");
             if (!reader.IsDBNull(idxShipDate)) obj.ShipDate = reader.GetDateTime(idxShipDate);
 
@@ -313,6 +349,7 @@ namespace MDUA.DataAccess
             int idxActualDelivery = reader.GetOrdinal("ActualDeliveryDate");
             if (!reader.IsDBNull(idxActualDelivery)) obj.ActualDeliveryDate = reader.GetDateTime(idxActualDelivery);
 
+            // 5. Map Cost & Audit
             int idxCost = reader.GetOrdinal("ShippingCost");
             if (!reader.IsDBNull(idxCost)) obj.ShippingCost = reader.GetDecimal(idxCost);
             else obj.ShippingCost = 0;
@@ -331,7 +368,6 @@ namespace MDUA.DataAccess
             obj.RowState = BaseBusinessEntity.RowStateEnum.NormalRow;
             return obj;
         }
-
         #endregion
     }
 }

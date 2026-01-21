@@ -94,7 +94,7 @@ ViewData["Title"] = "Add Product";
                     </div>
                 </div>
             </div>
-
+            <input type="hidden" id="targetCompanyId" value="@User.FindFirst("CompanyId")?.Value" />
             <!-- RIGHT COLUMN: Settings, Attributes & Actions -->
             <div class="col-lg-4">
                 <div class="glass-card p-4 position-sticky" style="top: 1rem;">
@@ -129,20 +129,33 @@ ViewData["Title"] = "Add Product";
                     <!-- Attributes Section -->
                     <h6 class="text-uppercase text-muted small fw-bold mb-3">Attributes & Variants</h6>
 
+                    <div class="alert alert-info py-2 small">
+                        <i class="fas fa-info-circle"></i> Select the <strong>Primary Visual</strong> attribute (e.g., Color). This determines how images are grouped.
+                    </div>
+
                     <div id="attributes-container" class="mb-2">
-                        <div class="attribute-row mb-2" data-attr-index="0">
-                            <label class="small text-muted fw-bold mb-1">Add attribute</label>
-                            <select name="Attributes[0].AttributeId" class="attribute-select form-select form-select-sm form-control-modal mb-2">
+                        <div class="attribute-row mb-2 p-2 border rounded bg-white" data-attr-index="0">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="form-check" title="This attribute controls the product image">
+                                    <input class="form-check-input is-primary-radio" type="radio" name="primaryAttributeGroup" id="primary_0" checked>
+                                    <label class="form-check-label small fw-bold text-primary" for="primary_0">
+                                        Primary Visual
+                                    </label>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger remove-attribute border-0" style="padding: 0 5px;">&times;</button>
+                            </div>
+
+                            <select name="Attributes[0].AttributeId" class="attribute-select form-select form-select-sm form-control-modal">
                                 <option value="">-- Select Attribute --</option>
                                 @if (Model.Attributes != null)
                                 {
-                                foreach (var a in Model.Attributes)
-                                {
-                                <option value="@a.Id">@a.Name</option>
-                                }
+                                    foreach (var a in Model.Attributes)
+                                    {
+                                        <option value="@a.Id">@a.Name</option>
+                                    }
                                 }
                             </select>
-                            <div class="attribute-values-container bg-white rounded border p-2 small"></div>
+                            <div class="attribute-values-container mt-2"></div>
                         </div>
                     </div>
 
